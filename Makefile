@@ -12,6 +12,9 @@ bundle_mac: dist/Buzz.app codesign_all_mac zip_mac notarize_zip staple_app_mac d
 
 bundle_mac_unsigned: dist/Buzz.app zip_mac dmg_mac_unsigned
 
+bundle_appimage: dist/Buzz
+	./appimage/build-appimage.sh
+
 clean:
 ifeq ($(OS), Windows_NT)
 	-rmdir /s /q buzz\whisper_cpp
@@ -207,6 +210,7 @@ translation_po_all:
 	$(MAKE) translation_po locale=nl
 	$(MAKE) translation_po locale=pl_PL
 	$(MAKE) translation_po locale=pt_BR
+	$(MAKE) translation_po locale=ru
 	$(MAKE) translation_po locale=uk_UA
 	$(MAKE) translation_po locale=zh_CN
 	$(MAKE) translation_po locale=zh_TW
@@ -236,6 +240,9 @@ else
 		python3 msgfmt.py -o $$dir/LC_MESSAGES/buzz.mo $$dir/LC_MESSAGES/buzz.po; \
 	done
 endif
+
+download-models:
+	uv run python scripts/download-models.py
 
 lint:
 	ruff check . --fix
