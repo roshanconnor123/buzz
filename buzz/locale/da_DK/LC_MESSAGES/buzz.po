@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: \n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-03-07 20:20+0200\n"
+"POT-Creation-Date: 2026-05-03 09:00+0300\n"
 "PO-Revision-Date: \n"
 "Last-Translator: Ole Guldberg2 <xalt7x.service@gmail.com>\n"
 "Language-Team: \n"
@@ -114,6 +114,11 @@ msgstr "Portugisisk (Brasilien)"
 
 #: buzz/widgets/preferences_dialog/general_preferences_widget.py
 #: buzz/transcriber/transcriber.py
+msgid "Russian"
+msgstr "Russisk"
+
+#: buzz/widgets/preferences_dialog/general_preferences_widget.py
+#: buzz/transcriber/transcriber.py
 msgid "Ukrainian"
 msgstr "Ukrainsk"
 
@@ -172,6 +177,7 @@ msgid "Export folder"
 msgstr "Eksportmappe"
 
 #: buzz/widgets/preferences_dialog/general_preferences_widget.py
+#: buzz/widgets/transcriber/advanced_settings_dialog.py
 msgid "Live recording mode"
 msgstr "Live optagelsestilstand"
 
@@ -295,6 +301,10 @@ msgstr "Genveje"
 #: buzz/widgets/preferences_dialog/preferences_dialog.py
 msgid "Folder Watch"
 msgstr "Mappeovervågning"
+
+#: buzz/widgets/preferences_dialog/models_preferences_widget.py
+msgid "What model should I use?"
+msgstr "Hvilket model skal jeg bruge?"
 
 #: buzz/widgets/preferences_dialog/models_preferences_widget.py
 msgid "Group"
@@ -428,6 +438,10 @@ msgid "AI model:"
 msgstr "AI model:"
 
 #: buzz/widgets/transcriber/advanced_settings_dialog.py
+msgid "Open documentation for AI translation models"
+msgstr "Åbn dokumentation for AI-oversættelsesmodeller"
+
+#: buzz/widgets/transcriber/advanced_settings_dialog.py
 msgid ""
 "Please translate each text sent to you from English to Spanish. Translation "
 "will be used in an automated system, please do not add any comments or "
@@ -448,10 +462,6 @@ msgstr "Optagelsesindstillinger"
 #: buzz/widgets/transcriber/advanced_settings_dialog.py
 msgid "Silence threshold:"
 msgstr "Tærskelværdi for stilhed:"
-
-#: buzz/widgets/transcriber/advanced_settings_dialog.py
-msgid "Live recording mode:"
-msgstr "Live optagelsestilstand:"
 
 #: buzz/widgets/transcriber/advanced_settings_dialog.py
 msgid "Line separator:"
@@ -1184,10 +1194,6 @@ msgid "Chinese"
 msgstr "Kinesisk"
 
 #: buzz/transcriber/transcriber.py
-msgid "Russian"
-msgstr "Russisk"
-
-#: buzz/transcriber/transcriber.py
 msgid "Korean"
 msgstr "Koreansk"
 
@@ -1634,6 +1640,9 @@ msgid ""
 msgstr ""
 "Taleoprydning mislykkedes! Kontroller din internetforbindelse — en model "
 "skal muligvis hentes ned."
+
+#~ msgid "Live recording mode:"
+#~ msgstr "Live optagelsestilstand:"
 
 #~ msgid "Comma-separated, e.g. \"0.0, 0.2, 0.4, 0.6, 0.8, 1.0\""
 #~ msgstr "Komma-separerede, fx., \"0.0, 0.2, 0.4, 0.6, 0.8, 1.0\""

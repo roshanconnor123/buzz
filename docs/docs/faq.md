@@ -41,6 +41,8 @@ In addition to choosing an appropriate model size you also can choose whisper ty
 - **Whisper.cpp** is optimized C++ implementation, it quite fast and efficient and will use any brand of GPU. Whisper.cpp is capable of running real time transcription even on a modern laptop with integrated GPU. It can also run on CPU only. Use this option if you do not have Nvidia GPU. 
 - **HuggingFace** option is a `Transformers` implementation and is good in that it supports wide range of custom models that may be optimized for a particular language. This option also supports [MMS](https://ai.meta.com/blog/multilingual-model-speech-recognition/) family of models from Meta AI that support over 1000 of worlds languages as well as [PEFT](https://github.com/huggingface/peft) adjustments to Whisper models.
 
+Models with `.En` in their names are for English and will not work for other languages. 
+
 ### 5. How to get GPU acceleration for faster transcription?
 
 On Linux GPU acceleration is supported out of the box on Nvidia GPUs. If you still get any issues install [CUDA 12](https://developer.nvidia.com/cuda-downloads), [cuBLASS](https://developer.nvidia.com/cublas) and [cuDNN](https://developer.nvidia.com/cudnn).
@@ -61,11 +63,15 @@ For method 2 there is no need to uninstall the antivirus, but see if you can tem
 
 Yes, Buzz can be used without internet connection if you download the necessary models on some other computer that has the internet and manually move them to the offline computer. The easiest way to find where the models are stored is to go to Help -> Preferences -> Models. Then download some model, and push "Show file location" button. This will open the folder where the models are stored. Copy the models folder to the same location on the offline computer. F.e. for Linux it is `.cache/Buzz/models` in your home directory.
 
+Please also check [`scripts/download-models.py`](https://github.com/chidiwilliams/buzz/blob/main/scripts/download-models.py). This is a script that can help you prepare model cache of offline use.
+
 ### 8. Buzz crashes, what to do?
 
 If a model download was incomplete or corrupted, Buzz may crash. Try to delete the downloaded model files in `Help -> Preferences -> Models` and re-download them.
 
-If that does not help, check the log file for errors and [report the issue](https://github.com/chidiwilliams/buzz/issues) so we can fix it. If possible attach the log file to the issue. Since Version `1.3.4`, to get to the logs folder go to `Help -> About Buzz` and click on `Show logs` button.
+If that does not help, check the log file for errors and [report the issue](https://github.com/chidiwilliams/buzz/issues) so we can fix it. If possible attach the log file to the issue. To get to the logs folder go to `Help -> About Buzz` and click on `Show logs` button.
+
+Also note that Buzz needs AVX2 support in your CPU, very old computers are not supported.
 
 ### 9. Where can I get latest development version?
 

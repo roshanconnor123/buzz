@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: \n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-03-07 20:20+0200\n"
+"POT-Creation-Date: 2026-05-03 09:00+0300\n"
 "PO-Revision-Date: 2024-03-17 20:50+0200\n"
 "Last-Translator: \n"
 "Language-Team: \n"
@@ -117,6 +117,11 @@ msgstr "Portugalski (Brazylia)"
 
 #: buzz/widgets/preferences_dialog/general_preferences_widget.py
 #: buzz/transcriber/transcriber.py
+msgid "Russian"
+msgstr "Rosyjski"
+
+#: buzz/widgets/preferences_dialog/general_preferences_widget.py
+#: buzz/transcriber/transcriber.py
 msgid "Ukrainian"
 msgstr "Ukraiński"
 
@@ -175,6 +180,7 @@ msgid "Export folder"
 msgstr "Folder eksportu"
 
 #: buzz/widgets/preferences_dialog/general_preferences_widget.py
+#: buzz/widgets/transcriber/advanced_settings_dialog.py
 msgid "Live recording mode"
 msgstr "Tryb nagrywania na żywo"
 
@@ -298,6 +304,10 @@ msgstr "Skróty"
 #: buzz/widgets/preferences_dialog/preferences_dialog.py
 msgid "Folder Watch"
 msgstr "Przeglądanie folderu"
+
+#: buzz/widgets/preferences_dialog/models_preferences_widget.py
+msgid "What model should I use?"
+msgstr "Którego modelu powinienem użyć?"
 
 #: buzz/widgets/preferences_dialog/models_preferences_widget.py
 msgid "Group"
@@ -431,6 +441,10 @@ msgid "AI model:"
 msgstr "Model AI:"
 
 #: buzz/widgets/transcriber/advanced_settings_dialog.py
+msgid "Open documentation for AI translation models"
+msgstr "Otwórz dokumentację modeli tłumaczenia AI"
+
+#: buzz/widgets/transcriber/advanced_settings_dialog.py
 msgid ""
 "Please translate each text sent to you from English to Spanish. Translation "
 "will be used in an automated system, please do not add any comments or "
@@ -451,10 +465,6 @@ msgstr "Ustawienia nagrywania"
 #: buzz/widgets/transcriber/advanced_settings_dialog.py
 msgid "Silence threshold:"
 msgstr "Próg ciszy:"
-
-#: buzz/widgets/transcriber/advanced_settings_dialog.py
-msgid "Live recording mode:"
-msgstr "Tryb nagrywania na żywo:"
 
 #: buzz/widgets/transcriber/advanced_settings_dialog.py
 msgid "Line separator:"
@@ -1188,10 +1198,6 @@ msgid "Chinese"
 msgstr "Chiński"
 
 #: buzz/transcriber/transcriber.py
-msgid "Russian"
-msgstr "Rosyjski"
-
-#: buzz/transcriber/transcriber.py
 msgid "Korean"
 msgstr "Koreański"
 
@@ -1638,6 +1644,9 @@ msgid ""
 msgstr ""
 "Wyodrębnianie mowy nie powiodło się! Sprawdź połączenie internetowe — może "
 "być konieczne pobranie modelu."
+
+#~ msgid "Live recording mode:"
+#~ msgstr "Tryb nagrywania na żywo:"
 
 #~ msgid "Comma-separated, e.g. \"0.0, 0.2, 0.4, 0.6, 0.8, 1.0\""
 #~ msgstr "Oddzielone przecinkiem, np. \"0.0, 0.2, 0.4, 0.6, 0.8, 1.0\""

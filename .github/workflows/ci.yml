@@ -23,7 +23,6 @@ jobs:
           - os: macos-15-intel
           - os: macos-latest
           - os: windows-latest
-          - os: ubuntu-22.04
           - os: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -62,7 +61,7 @@ jobs:
       - uses: AnimMouse/setup-ffmpeg@v1
         id: setup-ffmpeg
         with:
-          version: ${{ matrix.os == 'macos-15-intel' && '7.1.1' || matrix.os == 'macos-latest' && '80' || '8.0' }}
+          version: ${{ matrix.os == 'macos-15-intel' && '7.1.1' || matrix.os == 'macos-latest' && '711' || '7.1' }}
 
       - name: Test ffmpeg
         run: ffmpeg -i ./testdata/audio-long.mp3 ./testdata/audio-long.wav
@@ -74,16 +73,6 @@ jobs:
       - name: Install apt dependencies
         run: |
           sudo apt-get update
-
-          if [ "$(lsb_release -rs)" == "22.04" ]; then
-            sudo apt-get install libegl1-mesa
-
-            # Add ubuntu-toolchain-r PPA for newer libstdc++6 with GLIBCXX_3.4.32
-            sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
-            sudo apt-get update
-            sudo apt-get install -y libstdc++6
-          fi
-
           sudo apt-get install libyaml-dev libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-shape0 libxcb-cursor0 libportaudio2 gettext libpulse0 libgl1-mesa-dev libvulkan-dev ccache
         if: "startsWith(matrix.os, 'ubuntu-')"
 
@@ -117,6 +106,7 @@ jobs:
           - os: macos-15-intel
           - os: macos-latest
           - os: windows-latest
+          - os: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -160,31 +150,37 @@ jobs:
       - name: Install apt dependencies
         run: |
           sudo apt-get update
-
-          if [ "$(lsb_release -rs)" == "22.04" ]; then
-            sudo apt-get install libegl1-mesa
-
-            # Add ubuntu-toolchain-r PPA for newer libstdc++6 with GLIBCXX_3.4.32
-            sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
-            sudo apt-get update
-            sudo apt-get install -y libstdc++6
-          fi
-
           sudo apt-get install libyaml-dev libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-shape0 libxcb-cursor0 libportaudio2 gettext libpulse0 libgl1-mesa-dev libvulkan-dev ccache
+          
+          # Remove unused build tools to free up space
+          sudo apt-get remove -y azure-cli google-cloud-sdk hhvm google-chrome-stable firefox powershell mono-devel || true
+          sudo apt-get autoremove -y
+          sudo apt-get clean
+          rm -rf /opt/hostedtoolcache/node /opt/hostedtoolcache/go /opt/hostedtoolcache/Ruby /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk || true
+          
+          # Check available disk space
+          echo "=== Disk space ==="
+          df -h
         if: "startsWith(matrix.os, 'ubuntu-')"
 
       - name: Install dependencies
-        run: uv sync
+        run: |
+          uv sync
+          python -m pip cache purge
+          
+          # Check available disk space
+          echo "=== Disk space ==="
+          df -h
 
       - uses: AnimMouse/setup-ffmpeg@v1
         id: setup-ffmpeg
         with:
-          version: ${{ matrix.os == 'macos-15-intel' && '7.1.1' || matrix.os == 'macos-latest' && '80' || '8.0' }}
+          version: ${{ matrix.os == 'macos-15-intel' && '7.1.1' || matrix.os == 'macos-latest' && '711' || '7.1' }}
 
       - name: Install MSVC for Windows
         run: |
           if [ "$RUNNER_OS" == "Windows" ]; then
-            uv add msvc-runtime
+            uv pip install msvc-runtime
             uv pip install -U torch==2.8.0+cu129 torchaudio==2.8.0+cu129 --index-url https://download.pytorch.org/whl/cu129
             uv pip install nvidia-cublas-cu12==12.9.1.4 nvidia-cuda-cupti-cu12==12.9.79 nvidia-cuda-runtime-cu12==12.9.79 --extra-index-url https://pypi.ngc.nvidia.com
 
@@ -247,6 +243,10 @@ jobs:
             cp -r ./dll_backup ./buzz/
             uv run make bundle_windows
 
+          elif [ "$RUNNER_OS" == "Linux" ]; then
+
+            uv run make bundle_appimage
+
           fi
         env:
           BUZZ_CODESIGN_IDENTITY: ${{ secrets.BUZZ_CODESIGN_IDENTITY }}
@@ -266,6 +266,7 @@ jobs:
             dist/Buzz*-windows.exe
             dist/Buzz*-windows-*.bin
             dist/Buzz*-mac.dmg
+            dist/Buzz*.AppImage
 
   build_wheels:
     runs-on: ${{ matrix.os }}
@@ -339,6 +340,7 @@ jobs:
           - os: macos-15-intel
           - os: macos-latest
           - os: windows-latest
+          - os: ubuntu-latest
     needs: [build, test]
     if: startsWith(github.ref, 'refs/tags/')
     steps:
@@ -365,6 +367,7 @@ jobs:
             Buzz*.exe
             Buzz*.bin
             Buzz*.dmg
+            Buzz*.AppImage
 
 #  Brew Cask deployment fails and the app is deprecated on Brew.
 #  deploy_brew_cask:

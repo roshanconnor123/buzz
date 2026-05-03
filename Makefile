@@ -1,16 +1,22 @@
 # Change also in pyproject.toml and buzz/__version__.py
-version := 1.4.4
+version := 1.4.5
 
 mac_app_path := ./dist/Buzz.app
 mac_zip_path := ./dist/Buzz-${version}-mac.zip
 mac_dmg_path := ./dist/Buzz-${version}-mac.dmg
 
 bundle_windows: dist/Buzz
+	# Sanity-check: both halves of OpenSSL must ship together, otherwise users with
+	# a system OpenSSL on PATH hit "CRYPTO_calloc not found" from a mismatched pair.
+	powershell -NoProfile -Command "if (-not (Get-ChildItem -Path 'dist\Buzz' -Recurse -Filter 'libssl-3-x64.dll' -ErrorAction SilentlyContinue)) { Write-Error 'Missing libssl-3-x64.dll in dist\Buzz'; exit 1 }; if (-not (Get-ChildItem -Path 'dist\Buzz' -Recurse -Filter 'libcrypto-3-x64.dll' -ErrorAction SilentlyContinue)) { Write-Error 'Missing libcrypto-3-x64.dll in dist\Buzz'; exit 1 }"
 	iscc installer.iss
 
 bundle_mac: dist/Buzz.app codesign_all_mac zip_mac notarize_zip staple_app_mac dmg_mac
 
 bundle_mac_unsigned: dist/Buzz.app zip_mac dmg_mac_unsigned
+
+bundle_appimage: dist/Buzz
+	./appimage/build-appimage.sh
 
 clean:
 ifeq ($(OS), Windows_NT)
@@ -35,10 +41,10 @@ endif
 COVERAGE_THRESHOLD := 70
 
 test: buzz/whisper_cpp
-# A check to get updates of yt-dlp. Should run only on local as part of regular development operations
+# A check to get updates of yt-dlp and certifi. Should run only on local as part of regular development operations
 # Sort of a local "update checker"
 ifndef CI
-	uv lock --upgrade-package yt-dlp
+	uv lock --upgrade-package yt-dlp --upgrade-package certifi
 endif
 	pytest -s -vv --cov=buzz --cov-report=xml --cov-report=html --benchmark-skip --cov-fail-under=${COVERAGE_THRESHOLD} --cov-config=.coveragerc
 
@@ -114,7 +120,7 @@ dmg_mac:
 	ditto -x -k "${mac_zip_path}" dist/dmg
 	create-dmg \
 		--volname "Buzz" \
-		--volicon "./assets/buzz.icns" \
+		--volicon "./buzz/assets/buzz.icns" \
 		--window-pos 200 120 \
 		--window-size 600 300 \
 		--icon-size 100 \
@@ -131,7 +137,7 @@ dmg_mac_unsigned:
 	ditto -x -k "${mac_zip_path}" dist/dmg
 	create-dmg \
 		--volname "Buzz" \
-		--volicon "./assets/buzz.icns" \
+		--volicon "./buzz/assets/buzz.icns" \
 		--window-pos 200 120 \
 		--window-size 600 300 \
 		--icon-size 100 \
@@ -207,6 +213,7 @@ translation_po_all:
 	$(MAKE) translation_po locale=nl
 	$(MAKE) translation_po locale=pl_PL
 	$(MAKE) translation_po locale=pt_BR
+	$(MAKE) translation_po locale=ru
 	$(MAKE) translation_po locale=uk_UA
 	$(MAKE) translation_po locale=zh_CN
 	$(MAKE) translation_po locale=zh_TW
@@ -236,6 +243,9 @@ else
 		python3 msgfmt.py -o $$dir/LC_MESSAGES/buzz.mo $$dir/LC_MESSAGES/buzz.po; \
 	done
 endif
+
+download-models:
+	uv run python scripts/download-models.py
 
 lint:
 	ruff check . --fix
