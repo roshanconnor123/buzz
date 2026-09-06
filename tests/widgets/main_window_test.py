@@ -1,8 +1,9 @@
 import logging
 import os
 import tempfile
+import threading
 from typing import List
-from unittest.mock import patch, Mock
+from unittest.mock import call, patch, Mock
 
 import pytest
 from PyQt6.QtCore import QSize, Qt
@@ -19,7 +20,10 @@ from pytestqt.qtbot import QtBot
 from buzz.locale import _
 from buzz.db.entity.transcription import Transcription
 from buzz.db.service.transcription_service import TranscriptionService
+from buzz.model_loader import TranscriptionModel, ModelType, WhisperModelSize
+from buzz.transcriber.transcriber import Task, OutputFormat
 from buzz.widgets.main_window import MainWindow
+from buzz.widgets.preferences_dialog.models.file_transcription_preferences import FileTranscriptionPreferences
 from buzz.widgets.transcriber.file_transcriber_widget import FileTranscriberWidget
 
 mock_transcriptions: List[Transcription] = [
@@ -39,6 +43,30 @@ class TestMainWindow:
         qtbot.add_widget(window)
         assert window.windowTitle() == "Buzz"
         assert window.windowIcon().pixmap(QSize(64, 64)).isNull() is False
+        window.close()
+
+    def test_queue_busy_changes_are_serialized_on_gui_thread(
+        self, qtbot, transcription_service
+    ):
+        window = MainWindow(transcription_service)
+        qtbot.add_widget(window)
+        window.sleep_inhibitor = Mock()
+
+        background_emit = threading.Thread(
+            target=lambda: window.transcriber_worker.queue_busy_changed.emit(False)
+        )
+        background_emit.start()
+        background_emit.join()
+        window.transcriber_worker.queue_busy_changed.emit(True)
+
+        qtbot.wait_until(
+            lambda: window.sleep_inhibitor.set_busy.call_count == 2,
+            timeout=1000,
+        )
+        assert window.sleep_inhibitor.set_busy.call_args_list == [
+            call(False),
+            call(True),
+        ]
         window.close()
 
     def test_should_run_file_transcription_task(
@@ -355,13 +383,99 @@ class TestMainWindow:
         mock_open.assert_not_called()
         window.close()
 
+    def test_remembers_last_import_folder_for_file_dialog(
+        self, qtbot, transcription_service
+    ):
+        from buzz.settings.settings import Settings
+
+        window = MainWindow(transcription_service)
+        qtbot.add_widget(window)
+
+        with tempfile.TemporaryDirectory() as folder:
+            file_path = os.path.join(folder, "audio.mp3")
+            open(file_path, "w").close()
+
+            with patch(
+                "PyQt6.QtWidgets.QFileDialog.getOpenFileNames"
+            ) as mock_dialog, patch.object(
+                window, "open_file_transcriber_widget"
+            ):
+                mock_dialog.return_value = ([file_path], "")
+                window.on_new_transcription_action_triggered()
+
+            # The selected file's folder should be persisted
+            assert window.settings.value(
+                Settings.Key.LAST_IMPORT_FOLDER, ""
+            ) == os.path.dirname(file_path)
+
+            # On the next open, the dialog should be pre-pointed at that folder
+            with patch(
+                "PyQt6.QtWidgets.QFileDialog.getOpenFileNames"
+            ) as mock_dialog, patch.object(
+                window, "open_file_transcriber_widget"
+            ):
+                mock_dialog.return_value = ([], "")
+                window.on_new_transcription_action_triggered()
+                assert mock_dialog.call_args[0][2] == os.path.dirname(file_path)
+
+        window.settings.set_value(Settings.Key.LAST_IMPORT_FOLDER, "")
+        window.close()
+
+    def test_remembers_last_import_folder_for_folder_dialog(
+        self, qtbot, transcription_service
+    ):
+        from buzz.settings.settings import Settings
+
+        window = MainWindow(transcription_service)
+        qtbot.add_widget(window)
+
+        with tempfile.TemporaryDirectory() as folder:
+            open(os.path.join(folder, "audio.mp3"), "w").close()
+
+            with patch(
+                "PyQt6.QtWidgets.QFileDialog.getExistingDirectory"
+            ) as mock_dir, patch.object(window, "open_file_transcriber_widget"):
+                mock_dir.return_value = folder
+                window.on_import_folder_action_triggered()
+
+            assert window.settings.value(Settings.Key.LAST_IMPORT_FOLDER, "") == folder
+
+            # The next folder dialog should start at the remembered folder
+            with patch(
+                "PyQt6.QtWidgets.QFileDialog.getExistingDirectory"
+            ) as mock_dir, patch.object(window, "open_file_transcriber_widget"):
+                mock_dir.return_value = ""
+                window.on_import_folder_action_triggered()
+                assert mock_dir.call_args[0][2] == folder
+
+        window.settings.set_value(Settings.Key.LAST_IMPORT_FOLDER, "")
+        window.close()
+
     @staticmethod
     def _import_file_and_start_transcription(
         window: MainWindow, long_audio: bool = False
     ):
+        default_prefs = FileTranscriptionPreferences(
+            language=None,
+            task=Task.TRANSCRIBE,
+            model=TranscriptionModel(
+                model_type=ModelType.WHISPER,
+                whisper_model_size=WhisperModelSize.TINY,
+            ),
+            word_level_timings=False,
+            extract_speech=False,
+            initial_prompt="",
+            enable_llm_translation=False,
+            llm_prompt="",
+            llm_model="",
+            output_formats={OutputFormat.TXT},
+        )
+
         with patch(
             "PyQt6.QtWidgets.QFileDialog.getOpenFileNames"
-        ) as open_file_names_mock:
+        ) as open_file_names_mock, patch.object(
+            FileTranscriberWidget, "load_preferences", return_value=default_prefs
+        ):
             open_file_names_mock.return_value = (
                 [
                     get_test_asset(

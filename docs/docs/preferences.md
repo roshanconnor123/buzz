@@ -13,6 +13,8 @@ Open the Preferences window from the Menu bar, or click `Ctrl/Cmd + ,`.
 
 **Base URL** - By default all requests are sent to API provided by OpenAI company. Their API URL is `https://api.openai.com/v1/`. Compatible APIs are also provided by other companies. List of available API URLs and services to run yourself are available on [discussion page](https://github.com/chidiwilliams/buzz/discussions/827)
 
+**Reduce GPU RAM** - Will slightly compressed model versions for Huggingface, Faster Whisper and Whisper.cpp transcriptions to reduce required GPU memory. Same as `BUZZ_REDUCE_GPU_MEMORY` advanced preference.
+
 ### Default export file name
 
 Sets the default export file name for file transcriptions. For
@@ -107,18 +109,22 @@ Defaults to [user_cache_dir](https://pypi.org/project/platformdirs/).
 
 **BUZZ_DOWNLOAD_COOKIEFILE** - Location of a [cookiefile](https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp) to use for downloading private videos or as workaround for anti-bot protection.
 
-**BUZZ_FORCE_CPU** - Will force Buzz to use CPU and not GPU, useful for setups with older GPU if that is slower than GPU or GPU has issues. Example usage `BUZZ_FORCE_CPU=true`. Available since `1.2.1`
+**BUZZ_FORCE_CPU** - Will force Buzz to use CPU and not GPU, useful for setups with older GPU if that is slower than GPU or GPU has issues. Example usage `BUZZ_FORCE_CPU=true`.
 
-**BUZZ_REDUCE_GPU_MEMORY** - Will use 8bit quantization for Huggingface adn Faster Whisper transcriptions to reduce required GPU memory. Example usage `BUZZ_REDUCE_GPU_MEMORY=true`. Available since `1.4.0`
+**BUZZ_REDUCE_GPU_MEMORY** - Will use 8bit quantization for Huggingface, Faster Whisper and Whisper.cpp transcriptions to reduce required GPU memory. Example usage `BUZZ_REDUCE_GPU_MEMORY=true`. Available since `1.4.0`
 
-**BUZZ_MERGE_REGROUP_RULE** - Custom regroup merge rule to use when combining transcripts with word-level timings. More information on available options [in stable-ts repo](https://github.com/jianfch/stable-ts?tab=readme-ov-file#regrouping-methods). Available since `1.3.0`
+**BUZZ_MERGE_REGROUP_RULE** - Custom regroup merge rule to use when combining transcripts with word-level timings. More information on available options [in stable-ts repo](https://github.com/jianfch/stable-ts?tab=readme-ov-file#regrouping-methods). 
 
-**BUZZ_DISABLE_TELEMETRY** - Buzz collects basic OS name and architecture usage statistics to better focus development efforts. This variable lets disable collection of these statistics. Example usage `BUZZ_DISABLE_TELEMETRY=true`. Available since `1.3.0`
+**BUZZ_DISABLE_TELEMETRY** - Buzz collects basic OS name and architecture usage statistics to better focus development efforts. This variable lets disable collection of these statistics. Example usage `BUZZ_DISABLE_TELEMETRY=true`.
 
-**BUZZ_UPLOAD_URL** - Live recording transcripts and translations can be uploaded to a server for display on the web. Set this variable to the desired upload url. You can use [buzz-transcription-server](https://github.com/raivisdejus/buzz-transcription-server) as a server. Buzz will upload the following `json` via `POST` requests - `{"kind": "transcript", "text": "Sample transcript"}` or `{"kind": "translation", "text": "Sample translation"}`. Example usage `BUZZ_UPLOAD_URL=http://localhost:5000/upload`. Available since `1.3.0`
+**BUZZ_DISABLE_UPDATE_CHECK** - Disable checks for updates. Example usage `BUZZ_DISABLE_UPDATE_CHECK=true`. Available since `1.4.5`
+
+**BUZZ_UPLOAD_URL** - Live recording transcripts and translations can be uploaded to a server for display on the web. Set this variable to the desired upload url. You can use [buzz-transcription-server](https://github.com/raivisdejus/buzz-transcription-server) as a server. Buzz will upload the following `json` via `POST` requests - `{"kind": "transcript", "text": "Sample transcript"}` or `{"kind": "translation", "text": "Sample translation"}`. Example usage `BUZZ_UPLOAD_URL=http://localhost:5000/upload`. 
+
+**HF_ENDPOINT** - To speed up downloads in China set `HF_ENDPOINT=https://hf-mirror.com` 
 
 Example of data collected by telemetry:
 ```
 Buzz: 1.3.0, locale: ('lv_LV', 'UTF-8'), system: Linux, release: 6.14.0-27-generic, machine: x86_64, version: #27~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Tue Jul 22 17:38:49 UTC 2,
 ```
-**BUZZ_PARAGRAPH_SPLIT_TIME** - Time in milliseconds of silence to split paragraphs in transcript and add two newlines when exporting the transcripts as text. Default is `2000` or 2 seconds. Available since `1.3.0`
+**BUZZ_PARAGRAPH_SPLIT_TIME** - Time in milliseconds of silence to split paragraphs in transcript and add two newlines when exporting the transcripts as text. Default is `2000` or 2 seconds.

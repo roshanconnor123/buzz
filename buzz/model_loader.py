@@ -1,26 +1,43 @@
 import enum
 import hashlib
 import logging
+import multiprocessing
 import os
-import time
-import threading
+import queue
 import shutil
 import subprocess
 import sys
 import ssl
+import time
 import warnings
 import platform
 
 # Fix SSL certificate verification for bundled applications (macOS, Windows).
 # This must be done before importing libraries that make HTTPS requests.
+#
+# Try truststore first: it injects the OS/system certificate store (Windows
+# certificate store, macOS keychain) so corporate/enterprise proxy CAs are
+# trusted automatically. Fall back to certifi for environments where the
+# system store is sufficient but the bundled Python lacks its own CA bundle.
+_truststore_available = False
+try:
+    import truststore
+    truststore.inject_into_ssl()
+    _truststore_available = True
+    logging.debug("SSL: using system trust store via truststore")
+except ImportError:
+    pass
+except Exception as e:
+    logging.debug(f"SSL: truststore inject failed: {e}")
+
 try:
     import certifi
     _certifi_ca_bundle = certifi.where()
-    os.environ.setdefault("REQUESTS_CA_BUNDLE", _certifi_ca_bundle)
-    os.environ.setdefault("SSL_CERT_FILE", _certifi_ca_bundle)
-    os.environ.setdefault("SSL_CERT_DIR", os.path.dirname(_certifi_ca_bundle))
-    # Also update the default SSL context for urllib
-    ssl._create_default_https_context = lambda: ssl.create_default_context(cafile=_certifi_ca_bundle)
+    if not _truststore_available:
+        os.environ.setdefault("REQUESTS_CA_BUNDLE", _certifi_ca_bundle)
+        os.environ.setdefault("SSL_CERT_FILE", _certifi_ca_bundle)
+        os.environ.setdefault("SSL_CERT_DIR", os.path.dirname(_certifi_ca_bundle))
+        ssl._create_default_https_context = lambda: ssl.create_default_context(cafile=_certifi_ca_bundle)
 except ImportError:
     _certifi_ca_bundle = None
 
@@ -29,7 +46,7 @@ import whisper
 import huggingface_hub
 import zipfile
 from dataclasses import dataclass
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 from PyQt6.QtCore import QObject, pyqtSignal, QRunnable
 from platformdirs import user_cache_dir
@@ -37,23 +54,23 @@ from huggingface_hub.errors import LocalEntryNotFoundError
 
 from buzz.locale import _
 
-# Configure huggingface_hub to use certifi certificates directly.
-# This is more reliable than environment variables for frozen apps.
-if _certifi_ca_bundle is not None:
-    try:
-        from huggingface_hub import configure_http_backend
+# Configure huggingface_hub HTTP backend.
+# When truststore is active, a plain session inherits the patched SSL context.
+# When falling back to certifi, explicitly set session.verify to the CA bundle.
+try:
+    from huggingface_hub import configure_http_backend
 
-        def _hf_session_factory() -> requests.Session:
-            session = requests.Session()
+    def _hf_session_factory() -> requests.Session:
+        session = requests.Session()
+        if not _truststore_available and _certifi_ca_bundle is not None:
             session.verify = _certifi_ca_bundle
-            return session
+        return session
 
-        configure_http_backend(backend_factory=_hf_session_factory)
-    except ImportError:
-        # configure_http_backend not available in older huggingface_hub versions
-        pass
-    except Exception as e:
-        logging.debug(f"Failed to configure huggingface_hub HTTP backend: {e}")
+    configure_http_backend(backend_factory=_hf_session_factory)
+except ImportError:
+    pass
+except Exception as e:
+    logging.debug(f"Failed to configure huggingface_hub HTTP backend: {e}")
 
 # On Windows, creating symlinks requires special privileges (Developer Mode or
 # SeCreateSymbolicLinkPrivilege). Monkey-patch huggingface_hub to use file
@@ -106,6 +123,8 @@ model_root_dir = os.getenv("BUZZ_MODEL_ROOT", model_root_dir)
 os.makedirs(model_root_dir, exist_ok=True)
 
 logging.debug("Model root directory: %s", model_root_dir)
+
+DOWNLOAD_COMPLETE_MARKER = ".buzz_complete"
 
 class WhisperModelSize(str, enum.Enum):
     TINY = "tiny"
@@ -194,15 +213,17 @@ class ModelType(enum.Enum):
 HUGGING_FACE_MODEL_ALLOW_PATTERNS = [
     "model.safetensors",  # largest by size first
     "pytorch_model.bin",
-    "model-00001-of-00002.safetensors",
-    "model-00002-of-00002.safetensors",
+    "model-*-of-*.safetensors",  # glob covers any number of shards (e.g. VibeVoice ASR has 8)
     "model.safetensors.index.json",
     "added_tokens.json",
+    "chat_template.jinja",  # VibeVoice ASR ships its transcription prompt as a chat template
+    "chat_template.json",
     "config.json",
     "generation_config.json",
     "merges.txt",
     "normalizer.json",
     "preprocessor_config.json",
+    "processor_config.json",  # Parakeet transducers store the feature extractor config here
     "special_tokens_map.json",
     "tokenizer.json",
     "tokenizer_config.json",
@@ -284,6 +305,115 @@ def is_mms_model(model_id: str) -> bool:
         return False
 
 
+def is_parakeet_model(model_id: str) -> bool:
+    """Detect if a HuggingFace model is a Parakeet transducer (TDT/RNN-T/CTC) model.
+
+    Parakeet models are transducers, not Whisper-style seq2seq models, so they must
+    be loaded with AutoModelForTDT/RNNT/CTC instead of AutoModelForSpeechSeq2Seq.
+
+    Detection criteria:
+    1. Model ID (or local cache path) contains "parakeet"
+    2. Model config has a "parakeet_*" model_type
+    """
+    if not model_id:
+        return False
+
+    # Fast check: model ID / cache path pattern
+    if "parakeet" in model_id.lower():
+        return True
+
+    # For cached/downloaded models, check config.json
+    try:
+        import json
+        if os.path.isdir(model_id):
+            config_path = os.path.join(model_id, "config.json")
+        else:
+            config_path = huggingface_hub.hf_hub_download(
+                model_id, "config.json", local_files_only=True, cache_dir=model_root_dir
+            )
+        with open(config_path) as f:
+            config = json.load(f)
+        return str(config.get("model_type", "")).startswith("parakeet")
+    except Exception:
+        return False
+
+
+def is_vibevoice_model(model_id: str) -> bool:
+    """Detect if a HuggingFace model is a VibeVoice ASR model.
+
+    VibeVoice ASR models (e.g. microsoft/VibeVoice-ASR-HF) are loaded with
+    VibeVoiceAsrForConditionalGeneration and transcribed through the processor's
+    chat-template based ``apply_transcription_request`` API rather than the
+    standard Whisper seq2seq path.
+
+    Detection criteria:
+    1. Model ID (or local cache path) contains "vibevoice"
+    2. Model config has a "vibevoice_*" model_type
+    """
+    if not model_id:
+        return False
+
+    # Fast check: model ID / cache path pattern
+    if "vibevoice" in model_id.lower():
+        return True
+
+    # For cached/downloaded models, check config.json
+    try:
+        import json
+        if os.path.isdir(model_id):
+            config_path = os.path.join(model_id, "config.json")
+        else:
+            config_path = huggingface_hub.hf_hub_download(
+                model_id, "config.json", local_files_only=True, cache_dir=model_root_dir
+            )
+        with open(config_path) as f:
+            config = json.load(f)
+        return str(config.get("model_type", "")).startswith("vibevoice")
+    except Exception:
+        return False
+
+
+def is_qwen_asr_model(model_id: str) -> bool:
+    """Detect if a HuggingFace model is a Qwen3 ASR model.
+
+    Qwen3 ASR models (e.g. Qwen/Qwen3-ASR-1.7B-hf) are loaded with
+    AutoModelForMultimodalLM and transcribed through the processor's chat-template
+    based ``apply_transcription_request`` API rather than the standard Whisper
+    seq2seq path.
+
+    Detection criteria:
+    1. Model ID (or local cache path) mentions both "qwen" and "asr"
+    2. Model config has a "qwen*asr" model_type (e.g. "qwen3_asr")
+    """
+    if not model_id:
+        return False
+
+    # Fast check: model ID / cache path pattern
+    lowered = model_id.lower()
+    if "qwen" in lowered and "asr" in lowered:
+        return True
+
+    # For cached/downloaded models, check config.json
+    try:
+        import json
+        if os.path.isdir(model_id):
+            config_path = os.path.join(model_id, "config.json")
+        else:
+            config_path = huggingface_hub.hf_hub_download(
+                model_id, "config.json", local_files_only=True, cache_dir=model_root_dir
+            )
+        with open(config_path) as f:
+            config = json.load(f)
+        model_type = str(config.get("model_type", "")).lower()
+        return "qwen" in model_type and "asr" in model_type
+    except Exception:
+        return False
+
+
+def _snapshot_is_complete(snapshot_path: str) -> bool:
+    return os.path.exists(os.path.join(snapshot_path, DOWNLOAD_COMPLETE_MARKER))
+
+
 @dataclass()
 class TranscriptionModel:
     def __init__(
@@ -331,10 +461,28 @@ class TranscriptionModel:
 
     @staticmethod
     def default():
-        model_type = next(
-            model_type for model_type in ModelType if model_type.is_available()
-        )
-        return TranscriptionModel(model_type=model_type)
+        default_type_env = os.getenv("BUZZ_DEFAULT_MODEL_TYPE")
+        default_size_env = os.getenv("BUZZ_DEFAULT_MODEL_SIZE")
+
+        if default_type_env:
+            try:
+                model_type = ModelType(default_type_env)
+            except ValueError:
+                logging.warning("Unknown BUZZ_DEFAULT_MODEL_TYPE=%r, using default", default_type_env)
+                model_type = next(mt for mt in ModelType if mt.is_available())
+        else:
+            model_type = next(mt for mt in ModelType if mt.is_available())
+
+        if default_size_env:
+            try:
+                model_size = WhisperModelSize(default_size_env)
+            except ValueError:
+                logging.warning("Unknown BUZZ_DEFAULT_MODEL_SIZE=%r, using default", default_size_env)
+                model_size = WhisperModelSize.TINY
+        else:
+            model_size = WhisperModelSize.TINY
+
+        return TranscriptionModel(model_type=model_type, whisper_model_size=model_size)
 
     @staticmethod
     def open_path(path: str):
@@ -392,6 +540,9 @@ class TranscriptionModel:
             file_path = get_whisper_cpp_file_path(size=self.whisper_model_size)
             if not file_path or not os.path.exists(file_path) or not os.path.isfile(file_path):
                 return None
+            if self.whisper_model_size != WhisperModelSize.CUSTOM:
+                if not _snapshot_is_complete(os.path.dirname(file_path)):
+                    return None
             return file_path
 
         if self.model_type == ModelType.WHISPER:
@@ -416,18 +567,21 @@ class TranscriptionModel:
 
         if self.model_type == ModelType.FASTER_WHISPER:
             try:
-                return download_faster_whisper_model(
+                snapshot_path = download_faster_whisper_model(
                     model=self, local_files_only=True
                 )
             except (ValueError, FileNotFoundError):
                 return None
+            if not _snapshot_is_complete(snapshot_path):
+                return None
+            return snapshot_path
 
         if self.model_type == ModelType.OPEN_AI_WHISPER_API:
             return ""
 
         if self.model_type == ModelType.HUGGING_FACE:
             try:
-                return huggingface_hub.snapshot_download(
+                snapshot_path = huggingface_hub.snapshot_download(
                     self.hugging_face_model_id,
                     allow_patterns=HUGGING_FACE_MODEL_ALLOW_PATTERNS,
                     local_files_only=True,
@@ -436,24 +590,74 @@ class TranscriptionModel:
                 )
             except (ValueError, FileNotFoundError):
                 return None
+            if not _snapshot_is_complete(snapshot_path):
+                return None
+            return snapshot_path
 
         raise Exception("Unknown model type")
 
 
 WHISPER_CPP_REPO_ID = "ggerganov/whisper.cpp"
-WHISPER_CPP_LUMII_REPO_ID = "RaivisDejus/whisper.cpp-lv"
+WHISPER_CPP_LUMII_REPO_ID = "AiLab-IMCS-UL/whisper-large-v3-lv-late-cv19"
+WHISPER_CPP_LUMII_MAC_REPO_ID = "RaivisDejus/whisper.cpp-lv"
+
+# Not every size has a q8_0 build published, so use the closest available one.
+# None means no quantized build exists and the full model is used instead.
+# https://huggingface.co/ggerganov/whisper.cpp/discussions/32
+WHISPER_CPP_QUANTIZED_SUFFIXES = {
+    WhisperModelSize.LARGE: None,  # large-v1 has no quantized build
+    WhisperModelSize.LARGEV3: "-q5_0",
+}
+DEFAULT_WHISPER_CPP_QUANTIZED_SUFFIX = "-q8_0"
+
+
+def is_coreml_supported() -> bool:
+    return platform.system() == "Darwin" and platform.machine() == "arm64"
+
+
+def get_whisper_cpp_model_names(
+        size: WhisperModelSize,
+        coreml_supported: bool,
+) -> Tuple[str, str, str]:
+    """Resolve where a Whisper.cpp model is hosted and how its files are named.
+
+    Returns the repo id, the name of the model file to download and the base
+    name used for the CoreML encoder. The CoreML encoder is never quantized, so
+    its name can differ from the model file name.
+    """
+    repo_id = WHISPER_CPP_REPO_ID
+    model_name = size.to_whisper_cpp_model_size()
+
+    if size == WhisperModelSize.LUMII:
+        if coreml_supported:
+            # Only this repo has the CoreML encoder for the Latvian model
+            return WHISPER_CPP_LUMII_MAC_REPO_ID, "lumii", "lumii"
+
+        repo_id = WHISPER_CPP_LUMII_REPO_ID
+        model_name = "model"
+
+    coreml_name = model_name
+
+    reduce_gpu_memory = os.getenv("BUZZ_REDUCE_GPU_MEMORY", "false") != "false"
+    if reduce_gpu_memory:
+        suffix = WHISPER_CPP_QUANTIZED_SUFFIXES.get(
+            size, DEFAULT_WHISPER_CPP_QUANTIZED_SUFFIX)
+        if suffix is None:
+            logging.debug("No quantized Whisper.cpp build for %s, using full model", size)
+        else:
+            model_name = model_name + suffix
+
+    return repo_id, model_name, coreml_name
 
 
 def get_whisper_cpp_file_path(size: WhisperModelSize) -> str:
     if size == WhisperModelSize.CUSTOM:
         return os.path.join(model_root_dir, f"ggml-model-whisper-custom.bin")
 
-    repo_id = WHISPER_CPP_REPO_ID
+    repo_id, model_name, _ = get_whisper_cpp_model_names(
+        size, coreml_supported=is_coreml_supported())
 
-    if size == WhisperModelSize.LUMII:
-        repo_id = WHISPER_CPP_LUMII_REPO_ID
-
-    model_filename = f"ggml-{size.to_whisper_cpp_model_size()}.bin"
+    model_filename = f"ggml-{model_name}.bin"
 
     try:
         model_path = huggingface_hub.snapshot_download(
@@ -479,79 +683,53 @@ def get_whisper_file_path(size: WhisperModelSize) -> str:
     return os.path.join(root_dir, os.path.basename(url))
 
 
-class HuggingfaceDownloadMonitor:
-    def __init__(self, model_root: str, progress: pyqtSignal(tuple), total_file_size: int):
-        self.model_root = model_root
-        self.progress = progress
-        self.total_file_size = total_file_size
-        self.incomplete_download_root = None
-        self.stop_event = threading.Event()
-        self.monitor_thread = None
-        self.set_download_roots()
-
-    def set_download_roots(self):
-        normalized_model_root = os.path.normpath(self.model_root)
-        two_dirs_up = os.path.normpath(
-            os.path.join(normalized_model_root, "..", ".."))
-        self.incomplete_download_root = os.path.normpath(
-            os.path.join(two_dirs_up, "blobs"))
-
-    def clean_tmp_files(self):
-        for filename in os.listdir(model_root_dir):
-            if filename.startswith("tmp"):
-                os.remove(os.path.join(model_root_dir, filename))
-
-    def monitor_file_size(self):
-        while not self.stop_event.is_set():
-            try:
-                if model_root_dir is not None and os.path.isdir(model_root_dir):
-                    for filename in os.listdir(model_root_dir):
-                        if filename.startswith("tmp"):
-                            try:
-                                file_size = os.path.getsize(
-                                    os.path.join(model_root_dir, filename))
-                                self.progress.emit((file_size, self.total_file_size))
-                            except OSError:
-                                pass  # File may have been deleted
-
-                if self.incomplete_download_root and os.path.isdir(self.incomplete_download_root):
-                    for filename in os.listdir(self.incomplete_download_root):
-                        if filename.endswith(".incomplete"):
-                            try:
-                                file_size = os.path.getsize(os.path.join(
-                                    self.incomplete_download_root, filename))
-                                self.progress.emit((file_size, self.total_file_size))
-                            except OSError:
-                                pass  # File may have been deleted
-            except OSError:
-                pass  # Directory listing failed, ignore
-
-            time.sleep(2)
-
-    def start_monitoring(self):
-        self.clean_tmp_files()
-        self.monitor_thread = threading.Thread(target=self.monitor_file_size)
-        self.monitor_thread.start()
-
-    def stop_monitoring(self):
-        self.progress.emit((self.total_file_size, self.total_file_size))
-
-        if self.monitor_thread is not None:
-            self.stop_event.set()
-            self.monitor_thread.join()
+SNAPSHOT_DOWNLOAD_ATTEMPTS = 3
+SNAPSHOT_DOWNLOAD_RETRY_DELAY = 5  # seconds, doubled after each failed attempt
 
 
-def get_file_size(url):
-    response = requests.head(url, allow_redirects=True)
-    response.raise_for_status()
-    return int(response.headers['Content-Length'])
+def _snapshot_download_worker(result_queue, repo_id, allow_patterns, cache_dir, etag_timeout, max_workers):
+    """Runs snapshot_download in a child process so it can be killed on cancel.
+
+    Transient Hub failures (dropped connections, rate limits) surface as
+    LocalEntryNotFoundError or HfHubHTTPError and are retried; already
+    downloaded files stay in the cache, so a retry only fetches what is missing.
+    """
+    last_error = None
+
+    for attempt in range(SNAPSHOT_DOWNLOAD_ATTEMPTS):
+        try:
+            result = huggingface_hub.snapshot_download(
+                repo_id,
+                allow_patterns=allow_patterns,
+                cache_dir=cache_dir,
+                etag_timeout=etag_timeout,
+                max_workers=max_workers,
+            )
+            result_queue.put(('ok', result))
+            return
+        except (LocalEntryNotFoundError,
+                huggingface_hub.errors.HfHubHTTPError,
+                requests.RequestException) as exc:
+            last_error = exc
+            if attempt < SNAPSHOT_DOWNLOAD_ATTEMPTS - 1:
+                delay = SNAPSHOT_DOWNLOAD_RETRY_DELAY * (2 ** attempt)
+                logging.warning(
+                    "Download of %s failed (attempt %s/%s): %s. Retrying in %ss",
+                    repo_id, attempt + 1, SNAPSHOT_DOWNLOAD_ATTEMPTS, exc, delay,
+                )
+                time.sleep(delay)
+        except Exception as exc:
+            result_queue.put(('error', str(exc)))
+            return
+
+    result_queue.put(('error', str(last_error)))
 
 
 def download_from_huggingface(
         repo_id: str,
         allow_patterns: List[str],
         progress: pyqtSignal(tuple),
-        num_large_files: int = 1
+        on_process=None,
 ):
     progress.emit((0, 100))
 
@@ -560,58 +738,57 @@ def download_from_huggingface(
     # Use a single worker on Windows to avoid this issue.
     max_workers = 1 if sys.platform == "win32" else 8
 
-    try:
-        model_root = huggingface_hub.snapshot_download(
-            repo_id,
-            # all, but largest
-            allow_patterns=allow_patterns[num_large_files:],
-            cache_dir=model_root_dir,
-            etag_timeout=60,
-            max_workers=max_workers,
-        )
-    except Exception as exc:
-        logging.exception(exc)
-        return ""
+    result_queue = multiprocessing.Queue()
+    proc = multiprocessing.Process(
+        target=_snapshot_download_worker,
+        args=(result_queue, repo_id, allow_patterns, model_root_dir, 60, max_workers),
+        daemon=True,
+    )
+    if on_process is not None:
+        on_process(proc)
+    proc.start()
 
-    progress.emit((1, 100))
-
-    largest_file_size = 0
-    for pattern in allow_patterns[:num_large_files]:
+    # Read the result from the queue BEFORE joining. On Windows the queue's
+    # feeder thread may not have flushed the result to the underlying pipe by
+    # the time join() returns, so a get_nowait() right after join() can raise
+    # queue.Empty even on a successful download. Blocking on get() (while the
+    # process is alive) avoids that race.
+    result = None
+    while True:
         try:
-            file_url = huggingface_hub.hf_hub_url(repo_id, pattern)
-            file_size = get_file_size(file_url)
+            result = result_queue.get(timeout=1)
+            break
+        except queue.Empty:
+            if not proc.is_alive():
+                # Process exited; make one last attempt to drain the queue.
+                try:
+                    result = result_queue.get_nowait()
+                except queue.Empty:
+                    result = None
+                break
 
-            if file_size > largest_file_size:
-                largest_file_size = file_size
+    proc.join()
 
-        except requests.exceptions.RequestException as e:
-            continue
-
-    model_download_monitor = HuggingfaceDownloadMonitor(
-        model_root, progress, largest_file_size)
-    model_download_monitor.start_monitoring()
-
-    try:
-        huggingface_hub.snapshot_download(
-            repo_id,
-            allow_patterns=allow_patterns[:num_large_files],  # largest
-            cache_dir=model_root_dir,
-            etag_timeout=60,
-            max_workers=max_workers,
-        )
-    except Exception as exc:
-        logging.exception(exc)
-        model_download_monitor.stop_monitoring()
-
+    if result is None:
+        logging.error("snapshot_download subprocess produced no result (exitcode=%s)", proc.exitcode)
         return ""
 
-    model_download_monitor.stop_monitoring()
+    status, model_root = result
+    if status != 'ok':
+        logging.error("snapshot_download subprocess error: %s", model_root)
+        return ""
+
+    try:
+        open(os.path.join(model_root, DOWNLOAD_COMPLETE_MARKER), "w").close()
+    except OSError:
+        pass
 
     return model_root
 
 
 def download_faster_whisper_model(
-    model: TranscriptionModel, local_files_only=False, progress: pyqtSignal(tuple) = None
+    model: TranscriptionModel, local_files_only=False, progress: pyqtSignal(tuple) = None,
+    on_process=None,
 ):
     size = model.whisper_model_size.to_faster_whisper_model_size()
     custom_repo_id = model.hugging_face_model_id
@@ -649,7 +826,7 @@ def download_faster_whisper_model(
         repo_id,
         allow_patterns=allow_patterns,
         progress=progress,
-        num_large_files=2
+        on_process=on_process,
     )
 
 
@@ -662,132 +839,150 @@ class ModelDownloader(QRunnable):
     def __init__(self, model: TranscriptionModel, custom_model_url: Optional[str] = None):
         super().__init__()
 
-        self.is_coreml_supported = platform.system(
-        ) == "Darwin" and platform.machine() == "arm64"
+        self.is_coreml_supported = is_coreml_supported()
         self.signals = self.Signals()
         self.model = model
         self.stopped = False
         self.custom_model_url = custom_model_url
+        self._download_process: Optional[multiprocessing.Process] = None
+
+    def _register_process(self, proc: multiprocessing.Process):
+        self._download_process = proc
+
+    def _download_whisper_cpp(self) -> None:
+        if self.custom_model_url:
+            url = self.custom_model_url
+            file_path = get_whisper_cpp_file_path(
+                size=self.model.whisper_model_size)
+            self.download_model_to_path(url=url, file_path=file_path)
+            return
+
+        if self.model.whisper_model_size == WhisperModelSize.CUSTOM:
+            self.signals.error.emit(_("Custom model URL is not provided"))
+            return
+
+        repo_id, model_name, coreml_name = get_whisper_cpp_model_names(
+            self.model.whisper_model_size,
+            coreml_supported=self.is_coreml_supported,
+        )
+
+        whisper_cpp_model_files = [
+            f"ggml-{model_name}.bin",
+            "README.md"
+        ]
+
+        if self.is_coreml_supported:
+            whisper_cpp_model_files = [
+                f"ggml-{model_name}.bin",
+                f"ggml-{coreml_name}-encoder.mlmodelc.zip",
+                "README.md"
+            ]
+
+        model_path = download_from_huggingface(
+            repo_id=repo_id,
+            allow_patterns=whisper_cpp_model_files,
+            progress=self.signals.progress,
+            on_process=self._register_process,
+        )
+
+        if self.stopped:
+            return
+
+        if self.is_coreml_supported:
+            import tempfile
+
+            target_dir = os.path.join(model_path, f"ggml-{coreml_name}-encoder.mlmodelc")
+            zip_path = os.path.join(model_path, f"ggml-{coreml_name}-encoder.mlmodelc.zip")
+
+            if os.path.exists(target_dir):
+                shutil.rmtree(target_dir)
+
+            with tempfile.TemporaryDirectory() as temp_dir:
+                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    zip_ref.extractall(temp_dir)
+
+                macosx_path = os.path.join(temp_dir, "__MACOSX")
+                if os.path.exists(macosx_path):
+                    shutil.rmtree(macosx_path)
+
+                temp_contents = os.listdir(temp_dir)
+                if len(temp_contents) == 1 and os.path.isdir(os.path.join(temp_dir, temp_contents[0])):
+                    nested_dir = os.path.join(temp_dir, temp_contents[0])
+                    shutil.move(nested_dir, target_dir)
+                else:
+                    os.makedirs(target_dir, exist_ok=True)
+                    for item in temp_contents:
+                        src = os.path.join(temp_dir, item)
+                        dst = os.path.join(target_dir, item)
+                        if os.path.isdir(src):
+                            shutil.copytree(src, dst)
+                        else:
+                            shutil.copy2(src, dst)
+
+        self.signals.finished.emit(os.path.join(
+            model_path, f"ggml-{model_name}.bin"))
+
+    def _download_whisper(self) -> None:
+        url = whisper._MODELS[self.model.whisper_model_size.value]
+        file_path = get_whisper_file_path(
+            size=self.model.whisper_model_size)
+        expected_sha256 = url.split("/")[-2]
+        self.download_model_to_path(
+            url=url, file_path=file_path, expected_sha256=expected_sha256
+        )
+
+    def _download_faster_whisper(self) -> None:
+        model_path = download_faster_whisper_model(
+            model=self.model,
+            progress=self.signals.progress,
+            on_process=self._register_process,
+        )
+
+        if self.stopped:
+            return
+
+        if model_path == "":
+            self.signals.error.emit(_("Error"))
+            return
+
+        self.signals.finished.emit(model_path)
+
+    def _download_hugging_face(self) -> None:
+        model_path = download_from_huggingface(
+            self.model.hugging_face_model_id,
+            allow_patterns=HUGGING_FACE_MODEL_ALLOW_PATTERNS,
+            progress=self.signals.progress,
+            on_process=self._register_process,
+        )
+
+        if self.stopped:
+            return
+
+        if model_path == "":
+            self.signals.error.emit(_("Error"))
+            return
+
+        self.signals.finished.emit(model_path)
+
+    def _download_openai_whisper_api(self) -> None:
+        self.signals.finished.emit("")
 
     def run(self) -> None:
         logging.debug("Downloading model: %s, %s", self.model,
                       self.model.hugging_face_model_id)
 
         if self.model.model_type == ModelType.WHISPER_CPP:
-            if self.custom_model_url:
-                url = self.custom_model_url
-                file_path = get_whisper_cpp_file_path(
-                    size=self.model.whisper_model_size)
-                return self.download_model_to_path(url=url, file_path=file_path)
-
-            repo_id = WHISPER_CPP_REPO_ID
-
-            if self.model.whisper_model_size == WhisperModelSize.LUMII:
-                repo_id = WHISPER_CPP_LUMII_REPO_ID
-
-            model_name = self.model.whisper_model_size.to_whisper_cpp_model_size()
-
-            whisper_cpp_model_files = [
-                f"ggml-{model_name}.bin",
-                "README.md"
-            ]
-            num_large_files = 1
-            if self.is_coreml_supported:
-                whisper_cpp_model_files = [
-                    f"ggml-{model_name}.bin",
-                    f"ggml-{model_name}-encoder.mlmodelc.zip",
-                    "README.md"
-                ]
-                num_large_files = 2
-
-            model_path = download_from_huggingface(
-                repo_id=repo_id,
-                allow_patterns=whisper_cpp_model_files,
-                progress=self.signals.progress,
-                num_large_files=num_large_files
-            )
-
-            if self.is_coreml_supported:
-                import tempfile
-
-                target_dir = os.path.join(model_path, f"ggml-{model_name}-encoder.mlmodelc")
-                zip_path = os.path.join(model_path, f"ggml-{model_name}-encoder.mlmodelc.zip")
-
-                # Remove target directory if it exists
-                if os.path.exists(target_dir):
-                    shutil.rmtree(target_dir)
-
-                # Extract to a temporary directory first
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                        zip_ref.extractall(temp_dir)
-
-                    # Remove __MACOSX metadata folders if present
-                    macosx_path = os.path.join(temp_dir, "__MACOSX")
-                    if os.path.exists(macosx_path):
-                        shutil.rmtree(macosx_path)
-
-                    # Check if there's a single top-level directory
-                    temp_contents = os.listdir(temp_dir)
-                    if len(temp_contents) == 1 and os.path.isdir(os.path.join(temp_dir, temp_contents[0])):
-                        # Single directory - move its contents to target
-                        nested_dir = os.path.join(temp_dir, temp_contents[0])
-                        shutil.move(nested_dir, target_dir)
-                    else:
-                        # Multiple items or files - copy everything to target
-                        os.makedirs(target_dir, exist_ok=True)
-                        for item in temp_contents:
-                            src = os.path.join(temp_dir, item)
-                            dst = os.path.join(target_dir, item)
-                            if os.path.isdir(src):
-                                shutil.copytree(src, dst)
-                            else:
-                                shutil.copy2(src, dst)
-
-            self.signals.finished.emit(os.path.join(
-                model_path, f"ggml-{model_name}.bin"))
-            return
-
-        if self.model.model_type == ModelType.WHISPER:
-            url = whisper._MODELS[self.model.whisper_model_size.value]
-            file_path = get_whisper_file_path(
-                size=self.model.whisper_model_size)
-            expected_sha256 = url.split("/")[-2]
-            return self.download_model_to_path(
-                url=url, file_path=file_path, expected_sha256=expected_sha256
-            )
-
-        if self.model.model_type == ModelType.FASTER_WHISPER:
-            model_path = download_faster_whisper_model(
-                model=self.model,
-                progress=self.signals.progress,
-            )
-
-            if model_path == "":
-                self.signals.error.emit(_("Error"))
-
-            self.signals.finished.emit(model_path)
-            return
-
-        if self.model.model_type == ModelType.HUGGING_FACE:
-            model_path = download_from_huggingface(
-                self.model.hugging_face_model_id,
-                allow_patterns=HUGGING_FACE_MODEL_ALLOW_PATTERNS,
-                progress=self.signals.progress,
-                num_large_files=4
-            )
-
-            if model_path == "":
-                self.signals.error.emit(_("Error"))
-
-            self.signals.finished.emit(model_path)
-            return
-
-        if self.model.model_type == ModelType.OPEN_AI_WHISPER_API:
-            self.signals.finished.emit("")
-            return
-
-        raise Exception("Invalid model type: " + self.model.model_type.value)
+            self._download_whisper_cpp()
+        elif self.model.model_type == ModelType.WHISPER:
+            self._download_whisper()
+        elif self.model.model_type == ModelType.FASTER_WHISPER:
+            self._download_faster_whisper()
+        elif self.model.model_type == ModelType.HUGGING_FACE:
+            self._download_hugging_face()
+        elif self.model.model_type == ModelType.OPEN_AI_WHISPER_API:
+            self._download_openai_whisper_api()
+        else:
+            raise Exception("Invalid model type: " + self.model.model_type.value)
 
     def download_model_to_path(
         self, url: str, file_path: str, expected_sha256: Optional[str] = None
@@ -809,126 +1004,110 @@ class ModelDownloader(QRunnable):
                     os.remove(file_path)
                 logging.exception(exc)
 
-    def download_model(
+    def _prepare_resume_download(
         self, url: str, file_path: str, expected_sha256: Optional[str]
-    ) -> bool:
-        logging.debug(f"Downloading model from {url} to {file_path}")
-
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-
-        if os.path.exists(file_path) and not os.path.isfile(file_path):
-            raise RuntimeError(f"{file_path} exists and is not a regular file")
-
+    ) -> tuple[int, str, bool]:
         resume_from = 0
         file_mode = "wb"
 
-        if os.path.isfile(file_path):
-            file_size = os.path.getsize(file_path)
+        if not os.path.isfile(file_path):
+            return resume_from, file_mode, False
 
-            if expected_sha256 is not None:
-                # Get the expected file size from URL
-                try:
-                    head_response = requests.head(url, timeout=5, allow_redirects=True)
-                    expected_size = int(head_response.headers.get("Content-Length", 0))
+        file_size = os.path.getsize(file_path)
 
-                    if expected_size > 0:
-                        if file_size < expected_size:
-                            resume_from = file_size
-                            file_mode = "ab"
-                            logging.debug(
-                                f"File incomplete ({file_size}/{expected_size} bytes), resuming from byte {resume_from}"
-                            )
-                        elif file_size == expected_size:
-                            # This means file size matches - verify SHA256 to confirm it is complete
-                            try:
-                                # Use chunked reading to avoid loading entire file into memory
-                                sha256_hash = hashlib.sha256()
-                                with open(file_path, "rb") as f:
-                                    for chunk in iter(lambda: f.read(8192), b""):
-                                        sha256_hash.update(chunk)
-                                model_sha256 = sha256_hash.hexdigest()
-                                if model_sha256 == expected_sha256:
-                                    logging.debug("Model already downloaded and verified")
-                                    return True
-                                else:
-                                    warnings.warn(
-                                        f"{file_path} exists, but the SHA256 checksum does not match; re-downloading the file"
-                                    )
-                                    # File exists but it is wrong, delete it
-                                    os.remove(file_path)
-                            except Exception as e:
-                                logging.warning(f"Error checking existing file: {e}")
+        if expected_sha256 is not None:
+            try:
+                head_response = requests.head(url, timeout=5, allow_redirects=True)
+                expected_size = int(head_response.headers.get("Content-Length", 0))
+
+                if expected_size > 0:
+                    if file_size < expected_size:
+                        resume_from = file_size
+                        file_mode = "ab"
+                        logging.debug(
+                            f"File incomplete ({file_size}/{expected_size} bytes), resuming from byte {resume_from}"
+                        )
+                    elif file_size == expected_size:
+                        try:
+                            sha256_hash = hashlib.sha256()
+                            with open(file_path, "rb") as f:
+                                for chunk in iter(lambda: f.read(8192), b""):
+                                    sha256_hash.update(chunk)
+                            model_sha256 = sha256_hash.hexdigest()
+                            if model_sha256 == expected_sha256:
+                                logging.debug("Model already downloaded and verified")
+                                return resume_from, file_mode, True
+                            else:
+                                warnings.warn(
+                                    f"{file_path} exists, but the SHA256 checksum does not match; re-downloading the file"
+                                )
                                 os.remove(file_path)
-                        else:
-                            # File is larger than expected - corrupted, delete it
-                            warnings.warn(f"File size ({file_size}) exceeds expected size ({expected_size}), re-downloading")
-                            os.remove(file_path)                        
+                        except Exception as e:
+                            logging.warning(f"Error checking existing file: {e}")
+                            os.remove(file_path)
                     else:
-                        # Can't get expected size - use threshold approach
-                        if file_size < 10 * 1024 * 1024:
-                            resume_from = file_size
-                            file_mode = "ab"  # Append mode to resume
-                            logging.debug(f"Resuming download from byte {resume_from}")
-                        else:
-                            # Large file - verify SHA256 using chunked reading
-                            try:
-                                sha256_hash = hashlib.sha256()
-                                with open(file_path, "rb") as f:
-                                    for chunk in iter(lambda: f.read(8192), b""):
-                                        sha256_hash.update(chunk)
-                                model_sha256 = sha256_hash.hexdigest()
-                                if model_sha256 == expected_sha256:
-                                    logging.debug("Model already downloaded and verified")
-                                    return True
-                                else:
-                                    warnings.warn("SHA256 mismatch, re-downloading")
-                                    os.remove(file_path)
-                            except Exception as e:
-                                logging.warning(f"Error verifying file: {e}")
-                                os.remove(file_path)
-
-                except Exception as e:
-                    # Can't get expected size - use threshold
-                    logging.debug(f"Could not get expected file size: {e}, using threshold")
+                        warnings.warn(
+                            f"File size ({file_size}) exceeds expected size ({expected_size}), re-downloading"
+                        )
+                        os.remove(file_path)
+                else:
                     if file_size < 10 * 1024 * 1024:
                         resume_from = file_size
                         file_mode = "ab"
-                        logging.debug(f"Resuming from byte {resume_from}")
-            else:
-                # No SHA256 to verify - just check file size
-                if file_size > 0:
+                        logging.debug(f"Resuming download from byte {resume_from}")
+                    else:
+                        try:
+                            sha256_hash = hashlib.sha256()
+                            with open(file_path, "rb") as f:
+                                for chunk in iter(lambda: f.read(8192), b""):
+                                    sha256_hash.update(chunk)
+                            model_sha256 = sha256_hash.hexdigest()
+                            if model_sha256 == expected_sha256:
+                                logging.debug("Model already downloaded and verified")
+                                return resume_from, file_mode, True
+                            else:
+                                warnings.warn("SHA256 mismatch, re-downloading")
+                                os.remove(file_path)
+                        except Exception as e:
+                            logging.warning(f"Error verifying file: {e}")
+                            os.remove(file_path)
+            except Exception as e:
+                logging.debug(f"Could not get expected file size: {e}, using threshold")
+                if file_size < 10 * 1024 * 1024:
                     resume_from = file_size
                     file_mode = "ab"
-                    logging.debug(f"Resuming download from byte {resume_from}")
+                    logging.debug(f"Resuming from byte {resume_from}")
+        else:
+            if file_size > 0:
+                resume_from = file_size
+                file_mode = "ab"
+                logging.debug(f"Resuming download from byte {resume_from}")
 
-        # Downloads the model using the requests module instead of urllib to
-        # use the certs from certifi when the app is running in frozen mode
+        return resume_from, file_mode, False
 
-        # Check if server supports Range requests before starting download
-        supports_range = False
-        if resume_from > 0:
-            try:
-                head_resp = requests.head(url, timeout=10, allow_redirects=True)
-                accept_ranges = head_resp.headers.get("Accept-Ranges", "").lower()
-                supports_range = accept_ranges == "bytes"
-                if not supports_range:
-                    logging.debug("Server doesn't support Range requests, starting from beginning")
-                    resume_from = 0
-                    file_mode = "wb"
-            except requests.RequestException as e:
-                logging.debug(f"HEAD request failed, starting fresh: {e}")
-                resume_from = 0
-                file_mode = "wb"
+    def _check_range_support(self, url: str) -> bool:
+        try:
+            head_resp = requests.head(url, timeout=10, allow_redirects=True)
+            accept_ranges = head_resp.headers.get("Accept-Ranges", "").lower()
+            if accept_ranges != "bytes":
+                logging.debug("Server doesn't support Range requests, starting from beginning")
+                return False
+            return True
+        except requests.RequestException as e:
+            logging.debug(f"HEAD request failed, starting fresh: {e}")
+            return False
 
+    def _stream_download(
+        self, url: str, file_path: str, resume_from: int, file_mode: str,
+        supports_range: bool,
+    ) -> bool:
         headers = {}
         if resume_from > 0 and supports_range:
             headers["Range"] = f"bytes={resume_from}-"
 
-        # Use a temporary file for fresh downloads to ensure atomic writes
         temp_file_path = None
         if resume_from == 0:
             temp_file_path = file_path + ".downloading"
-            # Clean up any existing temp file
             if os.path.exists(temp_file_path):
                 try:
                     os.remove(temp_file_path)
@@ -953,7 +1132,6 @@ class ModelDownloader(QRunnable):
                             total_size = resume_from + int(source.headers.get("Content-Length", 0))
                         current = resume_from
                     else:
-                        # Server returned 200 instead of 206, need to start over
                         logging.debug("Server returned 200 instead of 206, starting fresh")
                         resume_from = 0
                         file_mode = "wb"
@@ -975,15 +1153,12 @@ class ModelDownloader(QRunnable):
                         current += len(chunk)
                         self.signals.progress.emit((current, total_size))
 
-            # If we used a temp file, rename it to the final path
-            if temp_file_path and os.path.exists(temp_file_path):
-                # Remove existing file if present
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-                shutil.move(temp_file_path, file_path)
+                if temp_file_path and os.path.exists(temp_file_path):
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                    shutil.move(temp_file_path, file_path)
 
         except Exception:
-            # Clean up temp file on error
             if temp_file_path and os.path.exists(temp_file_path):
                 try:
                     os.remove(temp_file_path)
@@ -991,26 +1166,59 @@ class ModelDownloader(QRunnable):
                     pass
             raise
 
-        if expected_sha256 is not None:
-            # Use chunked reading to avoid loading entire file into memory
-            sha256_hash = hashlib.sha256()
-            with open(file_path, "rb") as f:
-                for chunk in iter(lambda: f.read(8192), b""):
-                    sha256_hash.update(chunk)
-            if sha256_hash.hexdigest() != expected_sha256:
-                # Delete the corrupted file before raising the error
-                try:
-                    os.remove(file_path)
-                except OSError as e:
-                    logging.warning(f"Failed to delete corrupted model file: {e}")
-                raise RuntimeError(
-                    "Model has been downloaded but the SHA256 checksum does not match. Please retry loading the "
-                    "model."
-                )
+        return True
+
+    def _verify_sha256(self, file_path: str, expected_sha256: Optional[str]) -> None:
+        if expected_sha256 is None:
+            return
+        sha256_hash = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                sha256_hash.update(chunk)
+        if sha256_hash.hexdigest() != expected_sha256:
+            try:
+                os.remove(file_path)
+            except OSError as e:
+                logging.warning(f"Failed to delete corrupted model file: {e}")
+            raise RuntimeError(
+                "Model has been downloaded but the SHA256 checksum does not match. Please retry loading the "
+                "model."
+            )
+
+    def download_model(
+        self, url: str, file_path: str, expected_sha256: Optional[str]
+    ) -> bool:
+        logging.debug(f"Downloading model from {url} to {file_path}")
+
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+        if os.path.exists(file_path) and not os.path.isfile(file_path):
+            raise RuntimeError(f"{file_path} exists and is not a regular file")
+
+        resume_from, file_mode, already_downloaded = self._prepare_resume_download(
+            url, file_path, expected_sha256,
+        )
+        if already_downloaded:
+            return True
+
+        if resume_from > 0:
+            supports_range = self._check_range_support(url)
+            if not supports_range:
+                resume_from = 0
+                file_mode = "wb"
+        else:
+            supports_range = False
+
+        if not self._stream_download(url, file_path, resume_from, file_mode, supports_range):
+            return False
+
+        self._verify_sha256(file_path, expected_sha256)
 
         logging.debug("Downloaded model")
-
         return True
 
     def cancel(self):
         self.stopped = True
+        if self._download_process is not None and self._download_process.is_alive():
+            self._download_process.terminate()
+            self._download_process = None

@@ -39,6 +39,78 @@ class TestWhisperCpp:
         full_text = " ".join(segment.text for segment in segments)
         assert "Bien venu" in full_text or "bienvenu" in full_text.lower()
 
+    def test_detect_language(self):
+        model = TranscriptionModel(
+            model_type=ModelType.WHISPER_CPP,
+            whisper_model_size=WhisperModelSize.TINY,
+        )
+        model_path = get_model_path(model)
+
+        assert WhisperCpp.detect_language(test_audio_path, model_path) == "fr"
+        assert (
+            WhisperCpp.detect_language(test_multibyte_utf8_audio_path, model_path)
+            == "lv"
+        )
+
+    def test_detect_language_parses_stderr(self):
+        completed = MagicMock(
+            stderr="whisper_full_with_state: auto-detected language: de (p = 0.98)\n",
+            stdout="",
+        )
+        with patch(
+            "buzz.transcriber.whisper_cpp.subprocess.run", return_value=completed
+        ) as run_mock, patch(
+            "buzz.transcriber.whisper_cpp.get_whisper_cli_path",
+            return_value="/fake/whisper-cli",
+        ):
+            result = WhisperCpp.detect_language("/fake/audio.wav", "/fake/model.bin")
+
+        assert result == "de"
+        cmd = run_mock.call_args[0][0]
+        assert "--detect-language" in cmd
+        assert cmd[cmd.index("--model") + 1] == "/fake/model.bin"
+        # A supported format is passed straight through, no conversion.
+        assert cmd[cmd.index("-f") + 1] == "/fake/audio.wav"
+
+    def test_detect_language_no_match_returns_none(self):
+        completed = MagicMock(stderr="no language line here\n", stdout="")
+        with patch(
+            "buzz.transcriber.whisper_cpp.subprocess.run", return_value=completed
+        ), patch(
+            "buzz.transcriber.whisper_cpp.get_whisper_cli_path",
+            return_value="/fake/whisper-cli",
+        ):
+            assert (
+                WhisperCpp.detect_language("/fake/audio.wav", "/fake/model.bin") is None
+            )
+
+    def test_detect_language_converts_unsupported_format(self):
+        # .m4a is not directly supported, so ffmpeg should convert to .wav first
+        # and the converted path should be fed to whisper-cli.
+        detect_result = MagicMock(
+            stderr="auto-detected language: en (p = 0.9)\n", stdout=""
+        )
+        calls = []
+
+        def fake_run(cmd, *args, **kwargs):
+            calls.append(cmd)
+            if cmd[0] == "ffmpeg":
+                return MagicMock(returncode=0)
+            return detect_result
+
+        with patch(
+            "buzz.transcriber.whisper_cpp.subprocess.run", side_effect=fake_run
+        ), patch(
+            "buzz.transcriber.whisper_cpp.get_whisper_cli_path",
+            return_value="/fake/whisper-cli",
+        ):
+            result = WhisperCpp.detect_language("/fake/audio.m4a", "/fake/model.bin")
+
+        assert result == "en"
+        assert calls[0][0] == "ffmpeg"
+        detect_cmd = calls[-1]
+        assert detect_cmd[detect_cmd.index("-f") + 1] == "/fake/audio.m4a.wav"
+
     def test_transcribe_word_level_timestamps(self):
         transcription_options = TranscriptionOptions(
             language="lv",
@@ -81,7 +153,9 @@ class TestWhisperCpp:
         mock_json_data = {
             "transcription": [
                 {
-                    "offsets": {"from": 0, "to": 5000},
+                    # Segment offsets span the same range as the tokens below;
+                    # whisper.cpp emits them this way so VAD offset remapping is a no-op here.
+                    "offsets": {"from": 100, "to": 400},
                     "text": "",  # Not used in word-level processing
                     "tokens": [
                         {
@@ -168,7 +242,9 @@ class TestWhisperCpp:
         mock_json_data = {
             "transcription": [
                 {
-                    "offsets": {"from": 0, "to": 5000},
+                    # Segment offsets span the same range as the tokens below;
+                    # whisper.cpp emits them this way so VAD offset remapping is a no-op here.
+                    "offsets": {"from": 100, "to": 400},
                     "text": "",  # Not used in word-level processing
                     "tokens": [
                         {
@@ -238,3 +314,102 @@ class TestWhisperCpp:
         # Combined text
         full_text = "".join(s.text for s in segments)
         assert full_text == "大家好"
+
+    @staticmethod
+    def _run_with_mocked_json(mock_json_data, language, vad_enabled):
+        """Run WhisperCpp.transcribe against mocked whisper-cli JSON output.
+
+        os.path.exists drives whether the VAD model is considered available, which
+        in turn enables the per-token offset remapping.
+        """
+        json_bytes = json.dumps(mock_json_data, ensure_ascii=False).encode("latin-1")
+
+        transcription_options = TranscriptionOptions(
+            language=language,
+            task=Task.TRANSCRIBE,
+            word_level_timings=True,
+            model=TranscriptionModel(
+                model_type=ModelType.WHISPER_CPP,
+                whisper_model_size=WhisperModelSize.TINY,
+            ),
+        )
+
+        task = FileTranscriptionTask(
+            transcription_options=transcription_options,
+            file_transcription_options=FileTranscriptionOptions(),
+            model_path="/fake/model/path",
+            file_path="/fake/audio.wav",
+        )
+
+        mock_process = MagicMock()
+        mock_process.stderr.readline.side_effect = [""]
+        mock_process.wait.return_value = None
+        mock_process.returncode = 0
+
+        with patch("buzz.transcriber.whisper_cpp.subprocess.Popen", return_value=mock_process):
+            with patch("buzz.transcriber.whisper_cpp.os.path.exists", return_value=vad_enabled):
+                with patch("builtins.open", mock_open(read_data=json_bytes.decode("latin-1"))):
+                    return WhisperCpp.transcribe(task=task)
+
+    def test_vad_remaps_word_offsets_to_original_time(self):
+        """With VAD enabled, whisper-cli remaps segment offsets back to the original
+        audio timeline but leaves per-token offsets in the VAD-compressed timeline.
+
+        Word-level timestamps must be rescaled onto the segment's original time range
+        so leading silence does not push every word toward 0.
+        """
+        # Segment plays at 15.0s-21.0s in the original audio (silence trimmed by VAD),
+        # but its tokens are reported in compressed time spanning 0-3000ms.
+        # scale = (21000 - 15000) / (3000 - 0) = 2.0
+        mock_json_data = {
+            "transcription": [
+                {
+                    "offsets": {"from": 15000, "to": 21000},
+                    "text": "",
+                    "tokens": [
+                        {"text": "[_BEG_]", "offsets": {"from": 0, "to": 0}},
+                        {"text": " Hello", "offsets": {"from": 0, "to": 1000}},
+                        {"text": " world", "offsets": {"from": 1500, "to": 3000}},
+                    ],
+                }
+            ]
+        }
+
+        segments = self._run_with_mocked_json(mock_json_data, language="en", vad_enabled=True)
+
+        assert len(segments) == 2
+        assert segments[0].text == "Hello"
+        assert segments[1].text == "world"
+
+        # Remapped onto the segment's original 15000-21000ms range, not near 0.
+        assert segments[0].start == 15000
+        assert segments[0].end == 17000
+        assert segments[1].start == 18000
+        assert segments[1].end == 21000
+
+    def test_word_offsets_unchanged_without_vad(self):
+        """Without VAD, token offsets are already in original time and must pass
+        through the remapper unchanged (identity)."""
+        mock_json_data = {
+            "transcription": [
+                {
+                    "offsets": {"from": 0, "to": 3000},
+                    "text": "",
+                    "tokens": [
+                        {"text": "[_BEG_]", "offsets": {"from": 0, "to": 0}},
+                        {"text": " Hello", "offsets": {"from": 0, "to": 1000}},
+                        {"text": " world", "offsets": {"from": 1500, "to": 3000}},
+                    ],
+                }
+            ]
+        }
+
+        segments = self._run_with_mocked_json(mock_json_data, language="en", vad_enabled=False)
+
+        assert len(segments) == 2
+        assert segments[0].text == "Hello"
+        assert segments[0].start == 0
+        assert segments[0].end == 1000
+        assert segments[1].text == "world"
+        assert segments[1].start == 1500
+        assert segments[1].end == 3000

@@ -131,6 +131,14 @@ class FileTranscriberWidget(QWidget):
 
     def on_model_loaded(self, model_path: str):
         self.reset_transcriber_controls()
+        self.reset_model_download()
+
+        if model_path == "" and self.transcription_options.model.model_type != ModelType.OPEN_AI_WHISPER_API:
+            show_model_download_error_dialog(
+                self,
+                self.tr("Model path is empty. Check BUZZ_MODEL_ROOT and ensure the model is available offline"),
+            )
+            return
 
         self.triggered.emit(
             (self.transcription_options, self.file_transcription_options, model_path)

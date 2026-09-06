@@ -47,6 +47,10 @@ class Settings:
         FILE_TRANSCRIBER_WORD_LEVEL_TIMINGS = "file-transcriber/word-level-timings"
         FILE_TRANSCRIBER_EXPORT_FORMATS = "file-transcriber/export-formats"
 
+        TRANSCRIPTION_RESIZER_CREATE_NEW_TRANSCRIPT = (
+            "transcription-resizer/create-new-transcript"
+        )
+
         DEFAULT_EXPORT_FILE_NAME = "transcriber/default-export-file-name"
         CUSTOM_OPENAI_BASE_URL = "transcriber/custom-openai-base-url"
         OPENAI_API_MODEL = "transcriber/openai-api-model"
@@ -74,6 +78,8 @@ class Settings:
             "transcription-tasks-table/sort-state"
         )
 
+        LAST_IMPORT_FOLDER = "file-transcriber/last-import-folder"
+
         MAIN_WINDOW = "main-window"
         TRANSCRIPTION_VIEWER = "transcription-viewer"
 
@@ -81,9 +87,12 @@ class Settings:
 
         FORCE_CPU = "force-cpu"
         REDUCE_GPU_MEMORY = "reduce-gpu-memory"
+        PREVENT_SLEEP_WHILE_TRANSCRIBING = "prevent-sleep-while-transcribing"
 
         LAST_UPDATE_CHECK = "update/last-check"
         UPDATE_AVAILABLE_VERSION = "update/available-version"
+
+        PLUGINS = "plugins"
 
     def get_user_identifier(self) -> str:
         user_id = self.value(self.Key.USER_IDENTIFIER, "")
@@ -94,6 +103,7 @@ class Settings:
 
     def set_value(self, key: Key, value: typing.Any) -> None:
         self.settings.setValue(key.value, value)
+        self.settings.sync()
 
     def save_custom_model_id(self, model) -> None:
         from buzz.model_loader import ModelType

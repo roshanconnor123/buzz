@@ -38,8 +38,12 @@ When choosing among large models consider the following. "Large" is the first re
 In addition to choosing an appropriate model size you also can choose whisper type.
 - **Whisper** is initial OpenAI implementation, it is accurate but slow and requires a lot of RAM.
 - **Faster Whisper** is an optimized implementation, it is orders of magnitude faster than regular Whisper and requires less RAM. Use this option if you have an Nvidia GPU with at least 6GB of VRAM.
-- **Whisper.cpp** is optimized C++ implementation, it quite fast and efficient and will use any brand of GPU. Whisper.cpp is capable of running real time transcription even on a modern laptop with integrated GPU. It can also run on CPU only. Use this option if you do not have Nvidia GPU. 
-- **HuggingFace** option is a `Transformers` implementation and is good in that it supports wide range of custom models that may be optimized for a particular language. This option also supports [MMS](https://ai.meta.com/blog/multilingual-model-speech-recognition/) family of models from Meta AI that support over 1000 of worlds languages as well as [PEFT](https://github.com/huggingface/peft) adjustments to Whisper models.
+- **Whisper.cpp** is optimized C++ implementation, it quite fast and efficient and will use any brand of GPU. Whisper.cpp is capable of running real time transcription even on a modern laptop with integrated GPU. It can also run on CPU only. Use this option if you do not have Nvidia GPU. This is best option to us on Macs.
+- **HuggingFace** option is a `Transformers` implementation and is good in that it supports wide range of custom models that may be optimized for a particular language. 
+  - Since version `1.4.0` This option also supports [MMS](https://ai.meta.com/blog/multilingual-model-speech-recognition/) family of models from Meta AI that support over 1000 of worlds languages as well as [PEFT](https://github.com/huggingface/peft) adjustments to Whisper models.
+  - Since version `1.4.5` [Parakeet](https://huggingface.co/models?sort=trending&search=parakeet), [Qwen3-ASR](https://huggingface.co/models?sort=trending&search=qwen+asr+hf) and [VibeVoice ASR](https://huggingface.co/models?sort=trending&search=vibevoice+hf+) models are also supported.
+
+Models with `.En` in their names are for English and will not work for other languages. 
 
 ### 5. How to get GPU acceleration for faster transcription?
 
@@ -61,24 +65,28 @@ For method 2 there is no need to uninstall the antivirus, but see if you can tem
 
 Yes, Buzz can be used without internet connection if you download the necessary models on some other computer that has the internet and manually move them to the offline computer. The easiest way to find where the models are stored is to go to Help -> Preferences -> Models. Then download some model, and push "Show file location" button. This will open the folder where the models are stored. Copy the models folder to the same location on the offline computer. F.e. for Linux it is `.cache/Buzz/models` in your home directory.
 
+Please also check [`scripts/download-models.py`](https://github.com/chidiwilliams/buzz/blob/main/scripts/download-models.py). This is a script that can help you prepare model cache of offline use.
+
 ### 8. Buzz crashes, what to do?
 
 If a model download was incomplete or corrupted, Buzz may crash. Try to delete the downloaded model files in `Help -> Preferences -> Models` and re-download them.
 
-If that does not help, check the log file for errors and [report the issue](https://github.com/chidiwilliams/buzz/issues) so we can fix it. If possible attach the log file to the issue. Since Version `1.3.4`, to get to the logs folder go to `Help -> About Buzz` and click on `Show logs` button.
+If that does not help, check the log file for errors and [report the issue](https://github.com/chidiwilliams/buzz/issues) so we can fix it. If possible attach the log file to the issue. To get to the logs folder go to `Help -> About Buzz` and click on `Show logs` button.
+
+Also note that Buzz needs AVX2 support in your CPU, very old computers are not supported.
 
 ### 9. Where can I get latest development version?
 
 Latest development version will have latest bug fixes and most recent features. If you feel a bit adventurous it is recommended to try the latest development version as they needs some testing before they get released to everybody.
 
-- **Linux** users can get the latest version with this command `sudo snap install buzz --edge`
-
-- **For other** platforms do the following:
+- Do the following:
   1. Go to the [build section](https://github.com/chidiwilliams/buzz/actions/workflows/ci.yml?query=branch%3Amain)
   2. Click on the link to the latest build, the most recent successful build entry in the list
   3. Scroll down to the artifacts section in the build page
   4. Download the installation file. Please note that you need to be logged in the Github to see the download links.
   ![Latest build example](https://chidiwilliams.github.io/buzz/img/latest-development-build.jpeg "Latest build example")
+
+- **Linux** users can get the latest Appimage version following notes above or with this command `sudo snap install buzz --edge`
 
 ### 10. Why is my system theme not applied to Buzz installed from Flatpak?
  
@@ -94,3 +102,13 @@ You may need to copy the system themes to this folder `cp -r /usr/share/themes/ 
 
 On Fedora run the following to install the necessary packages 
 `sudo dnf install gnome-themes-extra qadwaitadecorations-qt{5,6} qt{5,6}-qtwayland`
+
+### 11. What libraries does Buzz use internally?
+
+Buzz uses many great libraries and tools internally. A few that we are really glad to have are:
+- [whisper.cpp](https://github.com/ggml-org/whisper.cpp)
+- [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
+- [transformers](https://github.com/huggingface/transformers)
+- [stable-ts](https://github.com/jianfch/stable-ts)
+- [srt_equalizer](https://github.com/peterk/srt_equalizer)
+- [whisper-diarization](https://github.com/MahmoudAshraf97/whisper-diarization)

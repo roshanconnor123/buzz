@@ -54,7 +54,8 @@ class TestLanguagesComboBox:
         languages_combox_box = LanguagesComboBox("en")
         qtbot.add_widget(languages_combox_box)
         assert languages_combox_box.itemText(0) == _("Detect Language")
-        assert languages_combox_box.itemText(1) == _("Afrikaans")
+        items = [languages_combox_box.itemText(i) for i in range(1, languages_combox_box.count())]
+        assert items == sorted(items)
 
     def test_should_select_en_as_default_language(self, qtbot):
         languages_combox_box = LanguagesComboBox("en")
@@ -128,8 +129,13 @@ class TestAdvancedSettingsDialog:
         assert dialog.windowTitle() == _("Advanced Settings")
         assert dialog.initial_prompt_text_edit.toPlainText() == "prompt"
         assert dialog.enable_llm_translation_checkbox.isChecked() is False
-        assert dialog.llm_model_line_edit.text() == "gpt-4.1-mini"
-        assert dialog.llm_prompt_text_edit.toPlainText() == _("Please translate each text sent to you from English to Spanish. Translation will be used in an automated system, please do not add any comments or notes, just the translation.")
+        assert dialog.llm_model_line_edit.text() == ""
+        assert dialog.llm_model_line_edit.placeholderText() == "add-model-id-here"
+
+        default_llm_prompt = _("Please translate each text sent to you from English to Spanish. Translation will be used in an automated system, please do not add any comments or notes, just the translation.")
+        assert dialog.llm_prompt_text_edit.toPlainText() == default_llm_prompt
+        # The pre-filled prompt is the value that will be used, not just a hint
+        assert dialog.transcription_options.llm_prompt == default_llm_prompt
 
         dialog.initial_prompt_text_edit.setPlainText("new prompt")
         dialog.enable_llm_translation_checkbox.setChecked(True)

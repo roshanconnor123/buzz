@@ -36,6 +36,12 @@ datas += copy_metadata("soundfile")
 datas += copy_metadata("dora-search")
 datas += copy_metadata("lhotse")
 
+# Catch build failure on Intel Macs
+try:
+    datas += copy_metadata("torchcodec")
+except Exception:
+    print("torchcodec not installed, skipping its metadata")
+
 # Allow transformers package to load __init__.py file dynamically:
 # https://github.com/chidiwilliams/buzz/issues/272
 datas += collect_data_files("transformers", include_py_files=True)
@@ -53,6 +59,11 @@ datas += collect_data_files("pytorch_lightning", include_py_files=True)
 datas += [("buzz/assets/*", "assets")]
 datas += [("buzz/locale", "locale")]
 datas += [("buzz/schema.sql", ".")]
+datas += [("buzz/plugins/ai_summary", "plugins/ai_summary")]
+datas += [("buzz/plugins/transcript_resizer", "plugins/transcript_resizer")]
+datas += [("buzz/plugins/export_docx", "plugins/export_docx")]
+datas += [("buzz/plugins/enhanced_language_detection", "plugins/enhanced_language_detection")]
+datas += [("buzz/plugins/deep_filter_net", "plugins/deep_filter_net")]
 
 block_cipher = None
 
@@ -124,9 +135,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    # pyarrow is excluded because its Windows wheel requires AVX2 CPU instructions,
-    # causing a crash (0xc000001d) on older hardware. Buzz does not use pyarrow directly;
-    excludes=["pyarrow"],
+    excludes=[],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
@@ -138,7 +147,7 @@ exe = EXE(
     pyz,
     a.scripts,
     options,
-    icon="./assets/buzz.ico",
+    icon="./buzz/assets/buzz.ico",
     exclude_binaries=True,
     name="Buzz",
     debug=DEBUG,
@@ -165,7 +174,7 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name="Buzz.app",
-    icon="./assets/buzz.icns",
+    icon="./buzz/assets/buzz.icns",
     bundle_identifier="com.chidiwilliams.buzz",
     version=VERSION,
     info_plist={

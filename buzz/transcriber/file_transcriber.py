@@ -5,7 +5,7 @@ import subprocess
 import shutil
 import tempfile
 from abc import abstractmethod
-from typing import Optional, List
+from typing import Any, Optional, List
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
@@ -24,6 +24,29 @@ app_env = os.environ.copy()
 app_env['PATH'] = os.pathsep.join([os.path.join(APP_BASE_DIR, "_internal")] + [app_env['PATH']])
 
 
+def _downloaded_file_path(info: Any) -> Path:
+    """Return the actual file path reported by yt-dlp after downloading."""
+    candidates = []
+
+    if info is not None:
+        filepath = info.get("filepath")
+        if filepath:
+            candidates.append(filepath)
+
+        for download in info.get("requested_downloads") or []:
+            filepath = download.get("filepath")
+            if filepath:
+                candidates.append(filepath)
+
+    for candidate in candidates:
+        path = Path(candidate).resolve()
+        if path.is_file():
+            return path
+
+    reported_path = candidates[0] if candidates else "<no filepath reported>"
+    raise FileNotFoundError(f"yt-dlp output does not exist: {reported_path}")
+
+
 class FileTranscriber(QObject):
     transcription_task: FileTranscriptionTask
     progress = pyqtSignal(tuple)  # (current, total)
@@ -38,87 +61,8 @@ class FileTranscriber(QObject):
     @pyqtSlot()
     def run(self):
         if self.transcription_task.source == FileTranscriptionTask.Source.URL_IMPORT:
-            cookiefile = os.getenv("BUZZ_DOWNLOAD_COOKIEFILE")
-
-            # First extract info to get the video title
-            extract_options = {
-                "logger": logging.getLogger(),
-            }
-            if cookiefile:
-                extract_options["cookiefile"] = cookiefile
-
-            try:
-                with YoutubeDL(extract_options) as ydl_info:
-                    info = ydl_info.extract_info(self.transcription_task.url, download=False)
-                    video_title = info.get("title", "audio")
-            except Exception as exc:
-                logging.debug(f"Error extracting video info: {exc}")
-                video_title = "audio"
-
-            # Sanitize title for use as filename
-            video_title = YoutubeDL.sanitize_info({"title": video_title})["title"]
-            # Remove characters that are problematic in filenames
-            for char in ['/', '\\', ':', '*', '?', '"', '<', '>', '|']:
-                video_title = video_title.replace(char, '_')
-
-            # Create temp directory and use video title as filename
-            temp_dir = tempfile.mkdtemp()
-            temp_output_path = os.path.join(temp_dir, video_title)
-            wav_file = temp_output_path + ".wav"
-            wav_file = str(Path(wav_file).resolve())
-
-            options = {
-                "format": "bestaudio/best",
-                "progress_hooks": [self.on_download_progress],
-                "outtmpl": temp_output_path,
-                "logger": logging.getLogger(),
-            }
-
-            if cookiefile:
-                options["cookiefile"] = cookiefile
-
-            ydl = YoutubeDL(options)
-
-            try:
-                logging.debug(f"Downloading audio file from URL: {self.transcription_task.url}")
-                ydl.download([self.transcription_task.url])
-            except Exception as exc:
-                logging.debug(f"Error downloading audio: {exc.msg}")
-                self.error.emit(exc.msg)
+            if not self._download_from_url():
                 return
-
-            cmd = [
-                "ffmpeg",
-                "-nostdin",
-                "-threads", "0",
-                "-i", temp_output_path,
-                "-ac", "1",
-                "-ar", str(whisper_audio.SAMPLE_RATE),
-                "-acodec", "pcm_s16le",
-                "-loglevel", "panic",
-                wav_file
-            ]
-
-            if sys.platform == "win32":
-                si = subprocess.STARTUPINFO()
-                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                si.wShowWindow = subprocess.SW_HIDE
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    startupinfo=si,
-                    env=app_env,
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-            else:
-                result = subprocess.run(cmd, capture_output=True)
-
-            if len(result.stderr):
-                logging.warning(f"Error processing downloaded audio. Error: {result.stderr.decode()}")
-                raise Exception(f"Error processing downloaded audio: {result.stderr.decode()}")
-
-            self.transcription_task.file_path = wav_file
-            logging.debug(f"Downloaded audio to file: {self.transcription_task.file_path}")
 
         try:
             segments = self.transcribe()
@@ -142,6 +86,7 @@ class FileTranscriber(QObject):
                 output_directory=self.transcription_task.output_directory,
                 model=self.transcription_task.transcription_options.model,
                 task=self.transcription_task.transcription_options.task,
+                display_name=self.transcription_task.display_name,
             )
 
             write_output(
@@ -149,22 +94,102 @@ class FileTranscriber(QObject):
             )
 
         if self.transcription_task.source == FileTranscriptionTask.Source.FOLDER_WATCH:
-            # Use original_file_path if available (before speech extraction changed file_path)
-            source_path = (
-                self.transcription_task.original_file_path
-                or self.transcription_task.file_path
+            self._handle_folder_watch()
+
+    def _download_from_url(self) -> bool:
+        cookiefile = os.getenv("BUZZ_DOWNLOAD_COOKIEFILE")
+
+        temp_dir = Path(tempfile.mkdtemp()).resolve()
+        # Never derive a working path from the media title. In particular,
+        # yt-dlp normalizes trailing dots and spaces differently on Windows.
+        download_template = str(temp_dir / "source.%(ext)s")
+        wav_file = temp_dir / "audio.wav"
+
+        options = {
+            "format": "bestaudio/best",
+            "progress_hooks": [self.on_download_progress],
+            "outtmpl": download_template,
+            "logger": logging.getLogger(),
+        }
+
+        if cookiefile:
+            options["cookiefile"] = cookiefile
+
+        try:
+            logging.debug(f"Downloading audio file from URL: {self.transcription_task.url}")
+            with YoutubeDL(options) as ydl:
+                info = ydl.extract_info(self.transcription_task.url, download=True)
+            downloaded_file = _downloaded_file_path(info)
+            title = info.get("title")
+            if title:
+                self.transcription_task.display_name = title
+        except Exception as exc:
+            message = getattr(exc, "msg", str(exc))
+            logging.debug(f"Error downloading audio: {message}")
+            self.error.emit(message)
+            return False
+
+        cmd = [
+            "ffmpeg",
+            "-nostdin",
+            "-threads", "0",
+            "-i", str(downloaded_file),
+            "-ac", "1",
+            "-ar", str(whisper_audio.SAMPLE_RATE),
+            "-acodec", "pcm_s16le",
+            "-loglevel", "panic",
+            str(wav_file)
+        ]
+
+        if sys.platform == "win32":
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            si.wShowWindow = subprocess.SW_HIDE
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                startupinfo=si,
+                env=app_env,
+                creationflags=subprocess.CREATE_NO_WINDOW
             )
-            if source_path and os.path.exists(source_path):
-                if self.transcription_task.delete_source_file:
-                    os.remove(source_path)
-                else:
-                    shutil.move(
-                        source_path,
-                        os.path.join(
-                            self.transcription_task.output_directory,
-                            os.path.basename(source_path),
-                        ),
-                    )
+        else:
+            result = subprocess.run(cmd, capture_output=True)
+
+        if result.returncode != 0:
+            error = result.stderr.decode("utf-8", errors="replace")
+            if not error:
+                error = f"ffmpeg exited with code {result.returncode}"
+            message = f"Error processing downloaded audio: {error}"
+            logging.warning(message)
+            self.error.emit(message)
+            return False
+
+        if not wav_file.is_file():
+            message = f"FFmpeg output does not exist: {wav_file}"
+            logging.warning(message)
+            self.error.emit(message)
+            return False
+
+        self.transcription_task.file_path = str(wav_file)
+        logging.debug(f"Downloaded audio to file: {self.transcription_task.file_path}")
+        return True
+
+    def _handle_folder_watch(self):
+        source_path = (
+            self.transcription_task.original_file_path
+            or self.transcription_task.file_path
+        )
+        if source_path and os.path.exists(source_path):
+            if self.transcription_task.delete_source_file:
+                os.remove(source_path)
+            else:
+                shutil.move(
+                    source_path,
+                    os.path.join(
+                        self.transcription_task.output_directory,
+                        os.path.basename(source_path),
+                    ),
+                )
 
     def on_download_progress(self, data: dict):
         if data["status"] == "downloading":
@@ -193,6 +218,11 @@ def write_output(
     )
 
     with open(os.fsencode(path), "w", encoding="utf-8") as file:
+        def segment_content(segment):
+            content = getattr(segment, segment_key).strip()
+            speaker = getattr(segment, "speaker", "").strip()
+            return f"{speaker}: {content}" if speaker else content
+
         if output_format == OutputFormat.TXT:
             combined_text = ""
             previous_end_time = None
@@ -202,7 +232,7 @@ def write_output(
             for segment in segments:
                 if previous_end_time is not None and (segment.start - previous_end_time) >= paragraph_split_time:
                     combined_text += "\n\n"
-                combined_text += getattr(segment, segment_key).strip() + " "
+                combined_text += segment_content(segment) + " "
                 previous_end_time = segment.end
 
             file.write(combined_text)
@@ -213,7 +243,7 @@ def write_output(
                 file.write(
                     f"{to_timestamp(segment.start)} --> {to_timestamp(segment.end)}\n"
                 )
-                file.write(f"{getattr(segment, segment_key)}\n\n")
+                file.write(f"{segment_content(segment)}\n\n")
 
         elif output_format == OutputFormat.SRT:
             for i, segment in enumerate(segments):
@@ -221,7 +251,7 @@ def write_output(
                 file.write(
                     f'{to_timestamp(segment.start, ms_separator=",")} --> {to_timestamp(segment.end, ms_separator=",")}\n'
                 )
-                file.write(f"{getattr(segment, segment_key)}\n\n")
+                file.write(f"{segment_content(segment)}\n\n")
 
     logging.debug("Written transcription output")
 

@@ -1,3 +1,4 @@
+import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QPushButton, QMessageBox, QLineEdit, QCheckBox
 
@@ -8,7 +9,52 @@ from buzz.widgets.preferences_dialog.general_preferences_widget import (
 )
 
 
+@pytest.fixture(autouse=True)
+def reset_custom_openai_base_url():
+    """Restore the custom OpenAI base URL after each test.
+
+    The widget writes to the real (non test-scoped) ``Settings``, so a test that
+    sets a custom base URL would otherwise leak into the developer's Buzz config
+    and into later runs, where ``ValidateOpenAIApiKeyJob`` would then query that
+    URL instead of the OpenAI API.
+    """
+    settings = Settings()
+    previous = settings.value(key=Settings.Key.CUSTOM_OPENAI_BASE_URL, default_value="")
+    settings.set_value(Settings.Key.CUSTOM_OPENAI_BASE_URL, "")
+    yield
+    settings.set_value(Settings.Key.CUSTOM_OPENAI_BASE_URL, previous)
+
+
 class TestGeneralPreferencesWidget:
+    def test_prevent_sleep_while_transcribing_preference(self, qtbot):
+        settings = Settings()
+        previous = settings.value(
+            key=Settings.Key.PREVENT_SLEEP_WHILE_TRANSCRIBING,
+            default_value=True,
+        )
+        settings.set_value(Settings.Key.PREVENT_SLEEP_WHILE_TRANSCRIBING, False)
+
+        try:
+            widget = GeneralPreferencesWidget()
+            qtbot.add_widget(widget)
+
+            checkbox = widget.findChild(QCheckBox, "PreventSleepCheckbox")
+            assert checkbox is not None
+            assert not checkbox.isChecked()
+
+            checkbox.click()
+
+            assert checkbox.isChecked()
+            assert widget.settings.value(
+                key=Settings.Key.PREVENT_SLEEP_WHILE_TRANSCRIBING,
+                default_value=False,
+            )
+        finally:
+            settings.set_value(
+                Settings.Key.PREVENT_SLEEP_WHILE_TRANSCRIBING,
+                previous,
+            )
+
     def test_should_disable_test_button_if_no_api_key(self, qtbot, mocker):
         mocker.patch(
             "buzz.widgets.preferences_dialog.general_preferences_widget.get_password",
@@ -36,25 +82,42 @@ class TestGeneralPreferencesWidget:
             return_value="wrong-api-key",
         )
 
+        # Never hit the real OpenAI API: a live request makes the assertion below
+        # depend on network latency and on OpenAI's exact error wording, which
+        # times out the 5s waitUntil on slow CI runners.
+        from openai import AuthenticationError
+
+        error_message = (
+            "Incorrect API key provided: wrong-ap*-key. You can find your "
+            "API key at https://platform.openai.com/account/api-keys."
+        )
+        mock_client = mocker.Mock()
+        mock_client.models.list.side_effect = AuthenticationError(
+            message=error_message,
+            response=mocker.Mock(),
+            body={"message": error_message},
+        )
+        mocker.patch(
+            "buzz.widgets.preferences_dialog.general_preferences_widget.OpenAI",
+            return_value=mock_client,
+        )
+
         widget = GeneralPreferencesWidget()
         qtbot.add_widget(widget)
 
         test_button = widget.findChild(QPushButton)
         assert isinstance(test_button, QPushButton)
 
-        test_button.click()
+        # Patch before clicking so the mock is in place by the time the worker
+        # thread's failed signal is delivered, and so it is undone afterwards.
+        message_box_warning_mock = mocker.patch.object(QMessageBox, "warning")
 
-        message_box_warning_mock = mocker.Mock()
-        QMessageBox.warning = message_box_warning_mock
+        test_button.click()
 
         def mock_called():
             message_box_warning_mock.assert_called()
             assert message_box_warning_mock.call_args[0][1] == _("OpenAI API Key Test")
-            assert (
-                    message_box_warning_mock.call_args[0][2]
-                    == "Incorrect API key provided: wrong-ap*-key. You can find your "
-                       "API key at https://platform.openai.com/account/api-keys."
-            )
+            assert message_box_warning_mock.call_args[0][2] == error_message
 
         qtbot.waitUntil(mock_called)
 

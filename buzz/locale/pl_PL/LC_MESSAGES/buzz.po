@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: \n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-03-07 20:20+0200\n"
+"POT-Creation-Date: 2026-08-22 14:09+0300\n"
 "PO-Revision-Date: 2024-03-17 20:50+0200\n"
 "Last-Translator: \n"
 "Language-Team: \n"
@@ -29,6 +29,8 @@ msgstr "https://przyklad.pl/audio.mp3"
 #: buzz/widgets/preferences_dialog/preferences_dialog.py
 #: buzz/widgets/preferences_dialog/models_preferences_widget.py
 #: buzz/widgets/transcriber/advanced_settings_dialog.py
+#: buzz/widgets/plugins_dialog/plugins_dialog.py
+#: buzz/widgets/plugins_dialog/plugin_settings_dialog.py
 #: buzz/widgets/main_window.py
 msgid "Ok"
 msgstr "OK"
@@ -36,6 +38,8 @@ msgstr "OK"
 #: buzz/widgets/import_url_dialog.py
 #: buzz/widgets/preferences_dialog/preferences_dialog.py
 #: buzz/widgets/preferences_dialog/models_preferences_widget.py
+#: buzz/widgets/plugins_dialog/plugins_dialog.py
+#: buzz/widgets/plugins_dialog/plugin_settings_dialog.py
 #: buzz/widgets/transcription_viewer/speaker_identification_widget.py
 #: buzz/widgets/model_download_progress_dialog.py buzz/widgets/main_window.py
 msgid "Cancel"
@@ -117,6 +121,11 @@ msgstr "Portugalski (Brazylia)"
 
 #: buzz/widgets/preferences_dialog/general_preferences_widget.py
 #: buzz/transcriber/transcriber.py
+msgid "Russian"
+msgstr "Rosyjski"
+
+#: buzz/widgets/preferences_dialog/general_preferences_widget.py
+#: buzz/transcriber/transcriber.py
 msgid "Ukrainian"
 msgstr "Ukraiński"
 
@@ -175,6 +184,7 @@ msgid "Export folder"
 msgstr "Folder eksportu"
 
 #: buzz/widgets/preferences_dialog/general_preferences_widget.py
+#: buzz/widgets/transcriber/advanced_settings_dialog.py
 msgid "Live recording mode"
 msgstr "Tryb nagrywania na żywo"
 
@@ -210,7 +220,8 @@ msgstr "Używaj tylko CPU i wyłącz akcelerację GPU"
 msgid "Set this if larger models do not fit your GPU memory and Buzz crashes"
 msgstr ""
 "Ustaw to, jeśli większe modele nie mieszczą się w pamięci GPU i Buzz się "
-"zawiesza"
+"zawieszaUstaw to, jeśli większe modele nie mieszczą się w pamięci GPU i Buzz "
+"się zawiesza"
 
 #: buzz/widgets/preferences_dialog/general_preferences_widget.py
 msgid "Disable GPU"
@@ -268,6 +279,7 @@ msgid "Input folder"
 msgstr "Folder wejściowy"
 
 #: buzz/widgets/preferences_dialog/folder_watch_preferences_widget.py
+#: buzz/plugins/export_docx/plugin.py
 msgid "Output folder"
 msgstr "Folder wyjściowy"
 
@@ -278,6 +290,24 @@ msgstr "Wybierz folder wejściowy"
 #: buzz/widgets/preferences_dialog/folder_watch_preferences_widget.py
 msgid "Select Output Folder"
 msgstr "Wybierz folder wyjściowy"
+
+#: buzz/widgets/preferences_dialog/folder_watch_preferences_widget.py
+#: buzz/widgets/preferences_dialog/models_preferences_widget.py
+#: buzz/widgets/transcription_tasks_table_widget.py
+#: buzz/widgets/update_dialog.py buzz/widgets/main_window.py
+#: buzz/model_loader.py
+msgid "Error"
+msgstr "Błąd"
+
+#: buzz/widgets/preferences_dialog/folder_watch_preferences_widget.py
+msgid ""
+"The output folder cannot be the input folder or a subfolder of it. This "
+"would cause transcriptions to be processed repeatedly. Please choose a "
+"different output folder."
+msgstr ""
+"Folder wyjściowy nie może być folderem wejściowym ani jego podfolderem. "
+"Spowodowałoby to wielokrotne przetwarzanie transkrypcji. Wybierz inny folder "
+"wyjściowy."
 
 #: buzz/widgets/preferences_dialog/preferences_dialog.py
 msgid "Preferences"
@@ -298,6 +328,10 @@ msgstr "Skróty"
 #: buzz/widgets/preferences_dialog/preferences_dialog.py
 msgid "Folder Watch"
 msgstr "Przeglądanie folderu"
+
+#: buzz/widgets/preferences_dialog/models_preferences_widget.py
+msgid "What model should I use?"
+msgstr "Którego modelu powinienem użyć?"
 
 #: buzz/widgets/preferences_dialog/models_preferences_widget.py
 msgid "Group"
@@ -343,13 +377,6 @@ msgstr "Czy na pewno chcesz usunąć wybrany model?"
 msgid "Download failed"
 msgstr "Pobieranie nie powiodło się"
 
-#: buzz/widgets/preferences_dialog/models_preferences_widget.py
-#: buzz/widgets/transcription_tasks_table_widget.py
-#: buzz/widgets/update_dialog.py buzz/widgets/main_window.py
-#: buzz/model_loader.py
-msgid "Error"
-msgstr "Błąd"
-
 #: buzz/widgets/record_button.py buzz/widgets/main_window_toolbar.py
 msgid "Record"
 msgstr "Nagraj"
@@ -382,6 +409,7 @@ msgid "Run"
 msgstr "Rozpocznij"
 
 #: buzz/widgets/transcriber/transcription_options_group_box.py
+#: buzz/widgets/transcription_viewer/speaker_identification_widget.py
 msgid "Model:"
 msgstr "Model:"
 
@@ -431,6 +459,10 @@ msgid "AI model:"
 msgstr "Model AI:"
 
 #: buzz/widgets/transcriber/advanced_settings_dialog.py
+msgid "Open documentation for AI translation models"
+msgstr "Otwórz dokumentację modeli tłumaczenia AI"
+
+#: buzz/widgets/transcriber/advanced_settings_dialog.py
 msgid ""
 "Please translate each text sent to you from English to Spanish. Translation "
 "will be used in an automated system, please do not add any comments or "
@@ -451,10 +483,6 @@ msgstr "Ustawienia nagrywania"
 #: buzz/widgets/transcriber/advanced_settings_dialog.py
 msgid "Silence threshold:"
 msgstr "Próg ciszy:"
-
-#: buzz/widgets/transcriber/advanced_settings_dialog.py
-msgid "Live recording mode:"
-msgstr "Tryb nagrywania na żywo:"
 
 #: buzz/widgets/transcriber/advanced_settings_dialog.py
 msgid "Line separator:"
@@ -566,10 +594,15 @@ msgid "Queued"
 msgstr "Kolejka"
 
 #: buzz/widgets/transcription_tasks_table_widget.py
+msgid "Skipped"
+msgstr "Pominięto"
+
+#: buzz/widgets/transcription_tasks_table_widget.py
 msgid "File Name / URL"
 msgstr "Nazwa pliku / URL"
 
 #: buzz/widgets/transcription_tasks_table_widget.py
+#: buzz/plugins/ai_summary/plugin.py
 msgid "Model"
 msgstr "Model"
 
@@ -626,9 +659,10 @@ msgid "Cannot Restart"
 msgstr "Nie można ponownie uruchomić"
 
 #: buzz/widgets/transcription_tasks_table_widget.py
-msgid "Only failed or canceled transcriptions can be restarted."
+msgid "Only failed, canceled, or skipped transcriptions can be restarted."
 msgstr ""
-"Tylko nieudane lub anulowane transkrypcje mogą być uruchomione ponownie."
+"Można ponownie uruchomić tylko transkrypcje zakończone niepowodzeniem, "
+"anulowane lub pominięte."
 
 #: buzz/widgets/transcription_tasks_table_widget.py
 msgid "Failed to restart transcription: {}"
@@ -645,8 +679,9 @@ msgstr ""
 #: buzz/widgets/transcription_tasks_table_widget.py
 msgid "Could not restart transcription: transcriber worker not found."
 msgstr ""
-"Nie można uruchomić ponownie transkrypcji: nie znaleziono procesu "
-"transkrypcji."
+"Nie można ponownie uruchomić transkrypcji: nie znaleziono pracownika "
+"transkrypcji.Nie można uruchomić ponownie transkrypcji: nie znaleziono "
+"procesu transkrypcji."
 
 #: buzz/widgets/recording_transcriber_widget.py
 msgid "Live Recording"
@@ -740,6 +775,74 @@ msgstr ""
 "Sprawdź urządzenia audio lub przejrzyj logi aplikacji, by uzyskać więcej "
 "informacji."
 
+#: buzz/widgets/plugins_dialog/plugins_dialog.py
+msgid "Plugins"
+msgstr "Wtyczki"
+
+#: buzz/widgets/plugins_dialog/plugins_dialog.py
+msgid ""
+"Plugins run with full access to your system. Only install plugins from "
+"sources you trust."
+msgstr ""
+"Wtyczki mają pełny dostęp do Twojego systemu. Instaluj tylko wtyczki z "
+"zaufanych źródeł."
+
+#: buzz/widgets/plugins_dialog/plugins_dialog.py
+msgid "Add by URL..."
+msgstr "Dodaj przez URL..."
+
+#: buzz/widgets/plugins_dialog/plugins_dialog.py
+msgid "Settings..."
+msgstr "Ustawienia..."
+
+#: buzz/widgets/plugins_dialog/plugins_dialog.py
+msgid "Move Up"
+msgstr "Przesuń w górę"
+
+#: buzz/widgets/plugins_dialog/plugins_dialog.py
+msgid "Move Down"
+msgstr "Przesuń w dół"
+
+#: buzz/widgets/plugins_dialog/plugins_dialog.py
+msgid "Remove"
+msgstr "Usuń"
+
+#: buzz/widgets/plugins_dialog/plugins_dialog.py
+msgid "Remove plugin"
+msgstr "Usuń wtyczkę"
+
+#: buzz/widgets/plugins_dialog/plugins_dialog.py
+msgid "Remove plugin '{}'?"
+msgstr "Usunąć wtyczkę '{}'?"
+
+#: buzz/widgets/plugins_dialog/plugins_dialog.py
+msgid "Add plugin"
+msgstr "Dodaj wtyczkę"
+
+#: buzz/widgets/plugins_dialog/plugins_dialog.py
+msgid "Plugin URL (.zip):"
+msgstr "Adres URL wtyczki (.zip):"
+
+#: buzz/widgets/plugins_dialog/plugins_dialog.py
+msgid "Installing plugin..."
+msgstr "Instalowanie wtyczki..."
+
+#: buzz/widgets/plugins_dialog/plugins_dialog.py
+msgid "Add plugin failed"
+msgstr "Nie udało się dodać wtyczki"
+
+#: buzz/widgets/plugins_dialog/plugins_dialog.py
+msgid ""
+"Could not install the plugin:\n"
+"{}"
+msgstr ""
+"Nie można zainstalować wtyczki:\n"
+"{}"
+
+#: buzz/widgets/plugins_dialog/plugin_settings_dialog.py
+msgid "Plugin not available."
+msgstr "Wtyczka niedostępna."
+
 #: buzz/widgets/update_dialog.py
 msgid "A new version of Buzz is available!"
 msgstr "Dostępna jest nowa wersja Buzz!"
@@ -813,12 +916,26 @@ msgid "Queue"
 msgstr "Kolejka"
 
 #: buzz/widgets/transcription_viewer/transcription_segments_editor_widget.py
+#: buzz/widgets/transcription_viewer/transcription_viewer_widget.py
+#: buzz/widgets/transcription_viewer/export_transcription_menu.py
+msgid "Unassigned"
+msgstr "Nieprzypisane"
+
+#: buzz/widgets/transcription_viewer/transcription_segments_editor_widget.py
+msgid "Choose an identified speaker or type a new speaker name."
+msgstr "Wybierz zidentyfikowanego mówcę lub wpisz nazwę nowego mówcy."
+
+#: buzz/widgets/transcription_viewer/transcription_segments_editor_widget.py
 msgid "Start"
 msgstr "Rozpocznij"
 
 #: buzz/widgets/transcription_viewer/transcription_segments_editor_widget.py
 msgid "End"
 msgstr "Zakończ"
+
+#: buzz/widgets/transcription_viewer/transcription_segments_editor_widget.py
+msgid "Speaker"
+msgstr "Mówca"
 
 #: buzz/widgets/transcription_viewer/transcription_segments_editor_widget.py
 #: buzz/widgets/transcription_viewer/transcription_view_mode_tool_button.py
@@ -832,6 +949,30 @@ msgstr "Tekst"
 msgid "Translation"
 msgstr "Tłumaczenie"
 
+#: buzz/widgets/transcription_viewer/transcription_segments_editor_widget.py
+msgid ""
+"Double-click to edit. Select multiple rows and right-click to assign "
+"speakers."
+msgstr ""
+"Kliknij dwukrotnie, aby edytować. Zaznacz wiele wierszy i kliknij prawym "
+"przyciskiem myszy, aby przypisać mówców."
+
+#: buzz/widgets/transcription_viewer/transcription_segments_editor_widget.py
+msgid "Assign Speaker"
+msgstr "Przypisz mówcę"
+
+#: buzz/widgets/transcription_viewer/transcription_segments_editor_widget.py
+msgid "New Speaker…"
+msgstr "Nowy mówca…"
+
+#: buzz/widgets/transcription_viewer/transcription_segments_editor_widget.py
+msgid "New Speaker"
+msgstr "Nowy mówca"
+
+#: buzz/widgets/transcription_viewer/transcription_segments_editor_widget.py
+msgid "Speaker name:"
+msgstr "Nazwa mówcy:"
+
 #: buzz/widgets/transcription_viewer/transcription_view_mode_tool_button.py
 msgid "View"
 msgstr "Widok"
@@ -839,6 +980,14 @@ msgstr "Widok"
 #: buzz/widgets/transcription_viewer/transcription_view_mode_tool_button.py
 msgid "Timestamps"
 msgstr "Znaczniki czasu"
+
+#: buzz/widgets/transcription_viewer/transcription_view_mode_tool_button.py
+msgid "Speakers"
+msgstr "Mówcy"
+
+#: buzz/widgets/transcription_viewer/transcription_viewer_widget.py
+msgid "Speaker:"
+msgstr "Mówca:"
 
 #: buzz/widgets/transcription_viewer/transcription_viewer_widget.py
 msgid "Export"
@@ -942,12 +1091,28 @@ msgid " of "
 msgstr " z "
 
 #: buzz/widgets/transcription_viewer/transcription_viewer_widget.py
+msgid "All speakers"
+msgstr "Wszyscy mówcy"
+
+#: buzz/widgets/transcription_viewer/transcription_viewer_widget.py
+msgid "No segments for this speaker."
+msgstr "Brak segmentów dla tego mówcy."
+
+#: buzz/widgets/transcription_viewer/transcription_viewer_widget.py
 msgid "API Key Required"
 msgstr "Wymagany klucz API"
 
 #: buzz/widgets/transcription_viewer/transcription_viewer_widget.py
 msgid "Please enter OpenAI API Key in preferences"
 msgstr "Wprowadź klucz API OpenAI w ustawieniach"
+
+#: buzz/widgets/transcription_viewer/transcription_resizer_widget.py
+msgid "Settings"
+msgstr "Ustawienia"
+
+#: buzz/widgets/transcription_viewer/transcription_resizer_widget.py
+msgid "Create new transcript"
+msgstr "Utwórz nową transkrypcję"
 
 #: buzz/widgets/transcription_viewer/transcription_resizer_widget.py
 msgid "Extend end time"
@@ -972,21 +1137,26 @@ msgstr "Żądana długość napisów"
 #: buzz/widgets/transcription_viewer/transcription_resizer_widget.py
 msgid "Available only if word level timings were disabled during transcription"
 msgstr ""
-"Dostępne tylko jeśli znaczniki dla słów były wyłączone podczas transkrypcji"
+"Dostępne tylko jeśli znaczniki czasu na poziomie słów były wyłączone podczas "
+"transkrypcjiDostępne tylko jeśli znaczniki dla słów były wyłączone podczas "
+"transkrypcji"
 
 #: buzz/widgets/transcription_viewer/transcription_resizer_widget.py
 msgid "Merge Options"
 msgstr "Opcje scalania"
 
 #: buzz/widgets/transcription_viewer/transcription_resizer_widget.py
+#: buzz/plugins/transcript_resizer/plugin.py
 msgid "Merge by gap"
-msgstr "Scal według przerwy"
+msgstr "Scal według odstępu"
 
 #: buzz/widgets/transcription_viewer/transcription_resizer_widget.py
+#: buzz/plugins/transcript_resizer/plugin.py
 msgid "Split by punctuation"
 msgstr "Podziel według interpunkcji"
 
 #: buzz/widgets/transcription_viewer/transcription_resizer_widget.py
+#: buzz/plugins/transcript_resizer/plugin.py
 msgid "Split by max length"
 msgstr "Podziel według maksymalnej długości"
 
@@ -997,7 +1167,27 @@ msgstr "Scal"
 #: buzz/widgets/transcription_viewer/transcription_resizer_widget.py
 msgid "Available only if word level timings were enabled during transcription"
 msgstr ""
-"Dostępne tylko jeśli znaczniki dla słów były włączone podczas transkrypcji"
+"Dostępne tylko jeśli znaczniki czasu na poziomie słów były włączone podczas "
+"transkrypcjiDostępne tylko jeśli znaczniki dla słów były włączone podczas "
+"transkrypcji"
+
+#: buzz/widgets/transcription_viewer/speaker_identification_widget.py
+msgid "3/8 Loading alignment model (retrying with cache...)"
+msgstr ""
+"3/8 Wczytywanie modelu wyrównania (ponowna próba z pamięcią podręczną...)3/8 "
+"Ładowanie modelu wyrównania (ponowna próba z pamięcią podręczną...)"
+
+#: buzz/widgets/transcription_viewer/speaker_identification_widget.py
+msgid ""
+"Failed to load alignment model. Please check your internet connection and "
+"try again."
+msgstr ""
+"Nie udało się załadować modelu wyrównania. Sprawdź połączenie internetowe i "
+"spróbuj ponownie."
+
+#: buzz/widgets/transcription_viewer/speaker_identification_widget.py
+msgid "0/0 Error identifying speakers"
+msgstr "0/0 Błąd podczas identyfikacji mówców"
 
 #: buzz/widgets/transcription_viewer/speaker_identification_widget.py
 msgid ""
@@ -1017,19 +1207,6 @@ msgstr "2/8 Ładowanie audio"
 #: buzz/widgets/transcription_viewer/speaker_identification_widget.py
 msgid "3/8 Loading alignment model"
 msgstr "3/8 Ładowanie modelu wyrównania"
-
-#: buzz/widgets/transcription_viewer/speaker_identification_widget.py
-msgid "3/8 Loading alignment model (retrying with cache...)"
-msgstr ""
-"3/8 Ładowanie modelu wyrównania (ponowna próba z pamięcią podręczną...)"
-
-#: buzz/widgets/transcription_viewer/speaker_identification_widget.py
-msgid ""
-"Failed to load alignment model. Please check your internet connection and "
-"try again."
-msgstr ""
-"Nie udało się załadować modelu wyrównania. Sprawdź połączenie internetowe i "
-"spróbuj ponownie."
 
 #: buzz/widgets/transcription_viewer/speaker_identification_widget.py
 msgid "4/8 Processing audio"
@@ -1052,10 +1229,6 @@ msgid "8/8 Identification done"
 msgstr "8/8 Identyfikacja zakończona"
 
 #: buzz/widgets/transcription_viewer/speaker_identification_widget.py
-msgid "0/0 Error identifying speakers"
-msgstr "0/0 Błąd podczas identyfikacji mówców"
-
-#: buzz/widgets/transcription_viewer/speaker_identification_widget.py
 msgid "Step 1: Identify speakers"
 msgstr "Krok 1: Identyfikuj mówców"
 
@@ -1070,6 +1243,26 @@ msgstr "Gotowy do identyfikacji mówców"
 #: buzz/widgets/transcription_viewer/speaker_identification_widget.py
 msgid "Audio file not found"
 msgstr "Nie znaleziono pliku audio"
+
+#: buzz/widgets/transcription_viewer/speaker_identification_widget.py
+msgid "MSDD"
+msgstr "MSDD"
+
+#: buzz/widgets/transcription_viewer/speaker_identification_widget.py
+msgid "Sortformer"
+msgstr "Sortformer"
+
+#: buzz/widgets/transcription_viewer/speaker_identification_widget.py
+msgid "Speakers:"
+msgstr "Mówcy:"
+
+#: buzz/widgets/transcription_viewer/speaker_identification_widget.py
+msgid "Auto"
+msgstr "Auto"
+
+#: buzz/widgets/transcription_viewer/speaker_identification_widget.py
+msgid "Set the known number of speakers, or use Auto to detect it."
+msgstr "Ustaw znaną liczbę mówców lub użyj opcji Auto, aby ją wykryć."
 
 #: buzz/widgets/transcription_viewer/speaker_identification_widget.py
 msgid "Step 2: Name speakers"
@@ -1096,12 +1289,28 @@ msgid "Cancelled"
 msgstr "Anulowano"
 
 #: buzz/widgets/transcription_viewer/export_transcription_menu.py
+msgid "DOCX – Speakers"
+msgstr "DOCX – Mówcy"
+
+#: buzz/widgets/transcription_viewer/export_transcription_menu.py
 msgid "Save File"
 msgstr "Zapisz plik"
 
 #: buzz/widgets/transcription_viewer/export_transcription_menu.py
 msgid "Text files"
 msgstr "Pliki tekstowe"
+
+#: buzz/widgets/transcription_viewer/export_transcription_menu.py
+msgid "Include timestamps for each speaker turn?"
+msgstr "Czy dołączyć znaczniki czasu dla każdej wypowiedzi?"
+
+#: buzz/widgets/transcription_viewer/export_transcription_menu.py
+msgid "Word documents"
+msgstr "Dokumenty Word"
+
+#: buzz/widgets/transcription_viewer/export_transcription_menu.py
+msgid "Export Failed"
+msgstr "Eksport nie powiódł się"
 
 #: buzz/widgets/model_download_progress_dialog.py
 msgid "Downloading model"
@@ -1134,6 +1343,10 @@ msgstr "Ustawienia..."
 #: buzz/widgets/menu_bar.py
 msgid "Help"
 msgstr "Pomoc"
+
+#: buzz/widgets/menu_bar.py
+msgid "Plugins..."
+msgstr "Wtyczki..."
 
 #: buzz/widgets/menu_bar.py
 msgid "File"
@@ -1186,10 +1399,6 @@ msgstr "Transkrybuj"
 #: buzz/transcriber/transcriber.py
 msgid "Chinese"
 msgstr "Chiński"
-
-#: buzz/transcriber/transcriber.py
-msgid "Russian"
-msgstr "Rosyjski"
 
 #: buzz/transcriber/transcriber.py
 msgid "Korean"
@@ -1551,6 +1760,10 @@ msgstr "Uruchamianie Whisper.cpp..."
 msgid "Starting transcription..."
 msgstr "Rozpoczynanie transkrypcji..."
 
+#: buzz/model_loader.py
+msgid "Custom model URL is not provided"
+msgstr "Nie podano adresu URL modelu niestandardowego"
+
 #: buzz/settings/shortcut.py
 msgid "Open Record Window"
 msgstr "Otwórz okno nagrywania"
@@ -1631,13 +1844,176 @@ msgstr "Dodaj powyżej"
 msgid "Append and correct"
 msgstr "Dodaj i popraw"
 
+#: buzz/plugins/enhanced_language_detection/plugin.py
+msgid "Enhanced language detection"
+msgstr "Ulepszone wykrywanie języka"
+
+#: buzz/plugins/enhanced_language_detection/plugin.py
+msgid ""
+"Detect the spoken language with whisper.cpp before transcription (using the "
+"largest downloaded model, or the tiny model otherwise) and use it for the "
+"transcription and exported file names. Only runs when the language is set to "
+"auto-detect."
+msgstr ""
+"Wykrywa język mówiony za pomocą whisper.cpp przed transkrypcją (przy użyciu "
+"największego pobranego modelu lub modelu tiny w przeciwnym razie) i używa go "
+"do transkrypcji oraz nazw eksportowanych plików. Działa tylko wtedy, gdy "
+"język jest ustawiony na automatyczne wykrywanie."
+
+#: buzz/plugins/enhanced_language_detection/plugin.py
+msgid "Download tiny model if none available"
+msgstr "Pobierz model tiny, jeśli żaden nie jest dostępny"
+
+#: buzz/plugins/enhanced_language_detection/plugin.py
+msgid ""
+"If no whisper.cpp model is downloaded, download the tiny model to use for "
+"language detection."
+msgstr ""
+"Jeśli nie pobrano żadnego modelu whisper.cpp, pobiera model tiny do "
+"wykrywania języka."
+
+#: buzz/plugins/export_docx/plugin.py
+msgid "Export to DOCX"
+msgstr "Eksportuj do DOCX"
+
+#: buzz/plugins/export_docx/plugin.py
+msgid ""
+"Export the transcript to a Microsoft Word (.docx) file after transcription, "
+"optionally including timestamps."
+msgstr ""
+"Eksportuje transkrypcję do pliku Microsoft Word (.docx) po transkrypcji, "
+"opcjonalnie z znacznikami czasu."
+
+#: buzz/plugins/export_docx/plugin.py buzz/plugins/ai_summary/plugin.py
+msgid "Leave empty to save next to the source file."
+msgstr "Pozostaw puste, aby zapisać obok pliku źródłowego."
+
+#: buzz/plugins/export_docx/plugin.py
+msgid "Include timestamps"
+msgstr "Dołącz znaczniki czasu"
+
+#: buzz/plugins/transcript_resizer/plugin.py
+msgid "Automatic Transcript Resizer"
+msgstr "Automatyczna zmiana rozmiaru transkrypcji"
+
+#: buzz/plugins/transcript_resizer/plugin.py
+msgid ""
+"When a transcription has word-level timings, automatically regroup the words "
+"into properly sized subtitles and replace the result. Mirrors the Merge "
+"options of the transcript resizer."
+msgstr ""
+"Gdy transkrypcja ma znaczniki czasu na poziomie słów, automatycznie grupuje "
+"słowa w napisy o odpowiednim rozmiarze i zastępuje wynik. Odzwierciedla "
+"opcje scalania w narzędziu do zmiany rozmiaru transkrypcji."
+
+#: buzz/plugins/transcript_resizer/plugin.py
+msgid "Merge gap (seconds)"
+msgstr "Odstęp scalania (sekundy)"
+
+#: buzz/plugins/transcript_resizer/plugin.py
+msgid "Punctuation"
+msgstr "Interpunkcja"
+
+#: buzz/plugins/transcript_resizer/plugin.py
+msgid "Maximum subtitle length"
+msgstr "Maksymalna długość napisu"
+
+#: buzz/plugins/deep_filter_net/plugin.py
+msgid "DeepFilterNet Noise Reduction"
+msgstr "Redukcja szumów DeepFilterNet"
+
+#: buzz/plugins/deep_filter_net/plugin.py
+msgid "Removes background noise using DeepFilterNet3 before transcription."
+msgstr "Usuwa szumy tła za pomocą DeepFilterNet3 przed transkrypcją."
+
+#: buzz/plugins/deep_filter_net/plugin.py
+msgid "Keep denoised file after transcription"
+msgstr "Zachowaj plik po usunięciu szumów po transkrypcji"
+
+#: buzz/plugins/skip_already_transcribed/plugin.py
+msgid "Skip Already Transcribed"
+msgstr "Pomijaj już transkrybowane"
+
+#: buzz/plugins/skip_already_transcribed/plugin.py
+msgid "Skip transcription if results already exist on disk or in the database"
+msgstr ""
+"Pomiń transkrypcję, jeśli wyniki już istnieją na dysku lub w bazie danych"
+
+#: buzz/plugins/skip_already_transcribed/plugin.py
+msgid "Check for existing result files"
+msgstr "Sprawdź istniejące pliki wyników"
+
+#: buzz/plugins/skip_already_transcribed/plugin.py
+msgid ""
+"Skip if a .txt, .srt, or .vtt file matching the audio filename is found next "
+"to it"
+msgstr ""
+"Pomiń, jeśli obok pliku audio znajduje się plik .txt, .srt lub .vtt o tej "
+"samej nazwie"
+
+#: buzz/plugins/skip_already_transcribed/plugin.py
+msgid "Check in transcription database"
+msgstr "Sprawdź w bazie danych transkrypcji"
+
+#: buzz/plugins/skip_already_transcribed/plugin.py
+msgid ""
+"Skip if this file has already been transcribed and the record exists in the "
+"database"
+msgstr ""
+"Pomiń, jeśli ten plik został już transkrybowany i wpis istnieje w bazie "
+"danych"
+
+#: buzz/plugins/ai_summary/plugin.py
+msgid "AI Summary"
+msgstr "Podsumowanie AI"
+
+#: buzz/plugins/ai_summary/plugin.py
+msgid ""
+"Generate an AI summary of the transcript via an OpenAI-compatible API and "
+"save it to the Notes field and/or a file."
+msgstr ""
+"Generuje podsumowanie transkrypcji przy użyciu AI za pośrednictwem API "
+"zgodnego z OpenAI i zapisuje je w polu notatek i/lub pliku."
+
+#: buzz/plugins/ai_summary/plugin.py
+msgid "API base URL"
+msgstr "Bazowy adres URL API"
+
+#: buzz/plugins/ai_summary/plugin.py
+msgid "API key"
+msgstr "Klucz API"
+
+#: buzz/plugins/ai_summary/plugin.py
+msgid "Summarization prompt"
+msgstr "Polecenie podsumowania"
+
+#: buzz/plugins/ai_summary/plugin.py
+msgid "Save summary to Notes"
+msgstr "Zapisz podsumowanie w notatkach"
+
+#: buzz/plugins/ai_summary/plugin.py
+msgid "Save summary to a file"
+msgstr "Zapisz podsumowanie w pliku"
+
+#: buzz/plugins/ai_summary/plugin.py
+msgid "Output folder (for file)"
+msgstr "Folder wyjściowy (dla pliku)"
+
+#: buzz/widgets/preferences_dialog/general_preferences_widget.py
+msgid "Prevent system sleep while transcriptions are queued"
+msgstr ""
+"Zapobiegaj uśpieniu systemu, gdy w kolejce są transkrypcje"
+
 #: buzz/file_transcriber_queue_worker.py
 msgid ""
-"Speech extraction failed! Check your internet connection — a model may need "
-"to be downloaded."
+"Speech extraction failed! Check your internet connection \\u2014 a model may "
+"need to be downloaded."
 msgstr ""
 "Wyodrębnianie mowy nie powiodło się! Sprawdź połączenie internetowe — może "
 "być konieczne pobranie modelu."
+
+#~ msgid "Live recording mode:"
+#~ msgstr "Tryb nagrywania na żywo:"
 
 #~ msgid "Comma-separated, e.g. \"0.0, 0.2, 0.4, 0.6, 0.8, 1.0\""
 #~ msgstr "Oddzielone przecinkiem, np. \"0.0, 0.2, 0.4, 0.6, 0.8, 1.0\""
@@ -1660,6 +2036,3 @@ msgstr ""
 
 #~ msgid "Redo"
 #~ msgstr "Ponów"
-
-#~ msgid "Downloading model (0%, unknown time remaining)"
-#~ msgstr "Pobieranie modelu (0%, pozostały czas nieznany)"

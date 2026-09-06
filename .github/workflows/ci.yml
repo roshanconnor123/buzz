@@ -20,41 +20,48 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-15-intel
           - os: macos-latest
           - os: windows-latest
-          - os: ubuntu-22.04
           - os: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
-      # Should be removed with next update to whisper.cpp
-      - name: Downgrade Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: '16.0.0'
-        if: matrix.os == 'macos-latest'
-
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
-      - name: Install Vulkan SDK
-        if: "startsWith(matrix.os, 'ubuntu-') || matrix.os == 'windows-latest'"
-        uses: humbletim/install-vulkan-sdk@v1.2
+      - name: Install Vulkan SDK (Linux)
+        if: startsWith(matrix.os, 'ubuntu-')
+        uses: jakoch/install-vulkan-sdk-action@v1.6.0
         with:
-          version: 1.4.309.0
+          vulkan_version: 1.4.309.0
           cache: true
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      # whisper.cpp 1.8.6's ggml-vulkan backend requires the SPIRV-Headers CMake
+      # config package, which the humbletim prebuilt SDK does not ship on Windows.
+      # Use LunarG's official installer (same approach as llama.cpp CI) instead.
+      - name: Install Vulkan SDK (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          # 1.4.313.2 is the oldest SDK that ships the SPIRV-Headers CMake config
+          # (SPIRV-HeadersConfig.cmake) under VULKAN_SDK, required by whisper.cpp 1.8.6.
+          $ver = '1.4.313.2'
+          curl.exe -f -o "$env:RUNNER_TEMP/VulkanSDK-Installer.exe" -L "https://sdk.lunarg.com/sdk/download/$ver/windows/vulkan-sdk.exe"
+          & "$env:RUNNER_TEMP/VulkanSDK-Installer.exe" --accept-licenses --default-answer --confirm-command install
+          Add-Content $env:GITHUB_ENV "VULKAN_SDK=C:\VulkanSDK\$ver"
+          Add-Content $env:GITHUB_PATH "C:\VulkanSDK\$ver\bin"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v9.0.0
 
       - name: Load cached venv
         id: cached-uv-dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .venv
           key: venv-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/uv.lock') }}
@@ -62,29 +69,19 @@ jobs:
       - uses: AnimMouse/setup-ffmpeg@v1
         id: setup-ffmpeg
         with:
-          version: ${{ matrix.os == 'macos-15-intel' && '7.1.1' || matrix.os == 'macos-latest' && '80' || '8.0' }}
+          version: ${{ matrix.os == 'macos-latest' && '711' || '8.1' }}
 
       - name: Test ffmpeg
         run: ffmpeg -i ./testdata/audio-long.mp3 ./testdata/audio-long.wav
 
       - name: Add msbuild to PATH
-        uses: microsoft/setup-msbuild@v2
+        uses: microsoft/setup-msbuild@v3
         if: runner.os == 'Windows'
 
       - name: Install apt dependencies
         run: |
           sudo apt-get update
-
-          if [ "$(lsb_release -rs)" == "22.04" ]; then
-            sudo apt-get install libegl1-mesa
-
-            # Add ubuntu-toolchain-r PPA for newer libstdc++6 with GLIBCXX_3.4.32
-            sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
-            sudo apt-get update
-            sudo apt-get install -y libstdc++6
-          fi
-
-          sudo apt-get install libyaml-dev libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-shape0 libxcb-cursor0 libportaudio2 gettext libpulse0 libgl1-mesa-dev libvulkan-dev ccache
+          sudo apt-get install libyaml-dev libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-shape0 libxcb-cursor0 libportaudio2 gettext libpulse0 libgl1-mesa-dev libvulkan-dev spirv-headers ccache
         if: "startsWith(matrix.os, 'ubuntu-')"
 
       - name: Install dependencies
@@ -98,7 +95,7 @@ jobs:
           PYTHONFAULTHANDLER: "1"
 
       - name: Upload coverage reports to Codecov with GitHub Action
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
           flags: ${{ runner.os }}
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -114,45 +111,57 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-15-intel
           - os: macos-latest
           - os: windows-latest
+          - os: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
-      # Should be removed with next update to whisper.cpp
-      - name: Downgrade Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: '16.0.0'
-        if: matrix.os == 'macos-latest'
-
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
-      - name: Install Vulkan SDK
-        if: "startsWith(matrix.os, 'ubuntu-') || matrix.os == 'windows-latest'"
-        uses: humbletim/install-vulkan-sdk@v1.2
+      - name: Install Vulkan SDK (Linux)
+        if: startsWith(matrix.os, 'ubuntu-')
+        uses: jakoch/install-vulkan-sdk-action@v1.6.0
         with:
-          version: 1.4.309.0
+          vulkan_version: 1.4.309.0
           cache: true
+          cache_save_if: false
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      # whisper.cpp 1.8.6's ggml-vulkan backend requires the SPIRV-Headers CMake
+      # config package, which the humbletim prebuilt SDK does not ship on Windows.
+      # Use LunarG's official installer (same approach as llama.cpp CI) instead.
+      - name: Install Vulkan SDK (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          # 1.4.313.2 is the oldest SDK that ships the SPIRV-Headers CMake config
+          # (SPIRV-HeadersConfig.cmake) under VULKAN_SDK, required by whisper.cpp 1.8.6.
+          $ver = '1.4.313.2'
+          curl.exe -f -o "$env:RUNNER_TEMP/VulkanSDK-Installer.exe" -L "https://sdk.lunarg.com/sdk/download/$ver/windows/vulkan-sdk.exe"
+          & "$env:RUNNER_TEMP/VulkanSDK-Installer.exe" --accept-licenses --default-answer --confirm-command install
+          Add-Content $env:GITHUB_ENV "VULKAN_SDK=C:\VulkanSDK\$ver"
+          Add-Content $env:GITHUB_PATH "C:\VulkanSDK\$ver\bin"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          save-cache: false
 
       - name: Load cached venv
         id: cached-uv-dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .venv
           key: venv-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/uv.lock') }}
 
       - name: Install Inno Setup on Windows
-        uses: crazy-max/ghaction-chocolatey@v3
+        uses: crazy-max/ghaction-chocolatey@v4
         with:
           args: install innosetup --yes
         if: runner.os == 'Windows'
@@ -160,33 +169,39 @@ jobs:
       - name: Install apt dependencies
         run: |
           sudo apt-get update
+          sudo apt-get install libyaml-dev libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-shape0 libxcb-cursor0 libportaudio2 gettext libpulse0 libgl1-mesa-dev libvulkan-dev spirv-headers ccache
 
-          if [ "$(lsb_release -rs)" == "22.04" ]; then
-            sudo apt-get install libegl1-mesa
-
-            # Add ubuntu-toolchain-r PPA for newer libstdc++6 with GLIBCXX_3.4.32
-            sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
-            sudo apt-get update
-            sudo apt-get install -y libstdc++6
-          fi
-
-          sudo apt-get install libyaml-dev libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-shape0 libxcb-cursor0 libportaudio2 gettext libpulse0 libgl1-mesa-dev libvulkan-dev ccache
+          # Remove unused build tools to free up space
+          sudo apt-get remove -y azure-cli google-cloud-sdk hhvm google-chrome-stable firefox powershell mono-devel || true
+          sudo apt-get autoremove -y
+          sudo apt-get clean
+          rm -rf /opt/hostedtoolcache/node /opt/hostedtoolcache/go /opt/hostedtoolcache/Ruby /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk || true
+          
+          # Check available disk space
+          echo "=== Disk space ==="
+          df -h
         if: "startsWith(matrix.os, 'ubuntu-')"
 
       - name: Install dependencies
-        run: uv sync
+        run: |
+          uv sync
+          python -m pip cache purge
+          
+          # Check available disk space
+          echo "=== Disk space ==="
+          df -h
 
       - uses: AnimMouse/setup-ffmpeg@v1
         id: setup-ffmpeg
         with:
-          version: ${{ matrix.os == 'macos-15-intel' && '7.1.1' || matrix.os == 'macos-latest' && '80' || '8.0' }}
+          version: ${{ matrix.os == 'macos-latest' && '711' || '8.1' }}
 
       - name: Install MSVC for Windows
         run: |
           if [ "$RUNNER_OS" == "Windows" ]; then
-            uv add msvc-runtime
+            uv pip install msvc-runtime
             uv pip install -U torch==2.8.0+cu129 torchaudio==2.8.0+cu129 --index-url https://download.pytorch.org/whl/cu129
-            uv pip install nvidia-cublas-cu12==12.9.1.4 nvidia-cuda-cupti-cu12==12.9.79 nvidia-cuda-runtime-cu12==12.9.79 --extra-index-url https://pypi.ngc.nvidia.com
+            uv pip install nvidia-cublas-cu12==12.9.1.4 nvidia-cuda-cupti-cu12==12.9.79 nvidia-cuda-runtime-cu12==12.9.79 --extra-index-url https://pypi.nvidia.com
 
             uv cache clean
             uv run pip cache purge
@@ -194,7 +209,7 @@ jobs:
         shell: bash
 
       - name: Add msbuild to PATH
-        uses: microsoft/setup-msbuild@v2
+        uses: microsoft/setup-msbuild@v3
         if: runner.os == 'Windows'
 
       - uses: ruby/setup-ruby@v1
@@ -220,6 +235,11 @@ jobs:
       - name: Bundle
         run: |
           if [ "$RUNNER_OS" == "macOS" ]; then
+
+            # The runner image ships aws/tap, which Homebrew now warns about on
+            # every invocation because whole-tap trust is required. Nothing here
+            # uses it, so drop it to keep the build log readable.
+            brew untap aws/tap || true
 
             brew install create-dmg
 
@@ -247,6 +267,10 @@ jobs:
             cp -r ./dll_backup ./buzz/
             uv run make bundle_windows
 
+          elif [ "$RUNNER_OS" == "Linux" ]; then
+
+            uv run make bundle_appimage
+
           fi
         env:
           BUZZ_CODESIGN_IDENTITY: ${{ secrets.BUZZ_CODESIGN_IDENTITY }}
@@ -259,13 +283,14 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         shell: bash
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Buzz-${{ runner.os }}-${{ runner.arch }}
           path: |
             dist/Buzz*-windows.exe
             dist/Buzz*-windows-*.bin
             dist/Buzz*-mac.dmg
+            dist/Buzz*.AppImage
 
   build_wheels:
     runs-on: ${{ matrix.os }}
@@ -274,35 +299,47 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-15-intel, macos-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
-      # Should be removed with next update to whisper.cpp
-      - name: Downgrade Xcode
-        uses: maxim-lobanov/setup-xcode@v1
+      - name: Install Vulkan SDK (Linux)
+        if: startsWith(matrix.os, 'ubuntu-')
+        uses: jakoch/install-vulkan-sdk-action@v1.6.0
         with:
-          xcode-version: '16.0.0'
-        if: matrix.os == 'macos-latest'
-
-      - name: Install Vulkan SDK
-        if: "startsWith(matrix.os, 'ubuntu-') || matrix.os == 'windows-latest'"
-        uses: humbletim/install-vulkan-sdk@v1.2
-        with:
-          version: 1.4.309.0
+          vulkan_version: 1.4.309.0
           cache: true
+          cache_save_if: false
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      # whisper.cpp 1.8.6's ggml-vulkan backend requires the SPIRV-Headers CMake
+      # config package, which the humbletim prebuilt SDK does not ship on Windows.
+      # Use LunarG's official installer (same approach as llama.cpp CI) instead.
+      - name: Install Vulkan SDK (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          # 1.4.313.2 is the oldest SDK that ships the SPIRV-Headers CMake config
+          # (SPIRV-HeadersConfig.cmake) under VULKAN_SDK, required by whisper.cpp 1.8.6.
+          $ver = '1.4.313.2'
+          curl.exe -f -o "$env:RUNNER_TEMP/VulkanSDK-Installer.exe" -L "https://sdk.lunarg.com/sdk/download/$ver/windows/vulkan-sdk.exe"
+          & "$env:RUNNER_TEMP/VulkanSDK-Installer.exe" --accept-licenses --default-answer --confirm-command install
+          Add-Content $env:GITHUB_ENV "VULKAN_SDK=C:\VulkanSDK\$ver"
+          Add-Content $env:GITHUB_PATH "C:\VulkanSDK\$ver\bin"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          save-cache: false
 
       - name: Build wheels
         run: uv build --wheel
         shell: bash
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: buzz-wheel-${{ runner.os }}-${{ runner.arch }}
           path: ./dist/*.whl
@@ -317,7 +354,7 @@ jobs:
       id-token: write
     if: startsWith(github.ref, 'refs/tags/')
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: buzz-wheel-*
           path: dist
@@ -336,17 +373,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-15-intel
           - os: macos-latest
           - os: windows-latest
+          # Current AppImage files are too large for the release
+          # This should be re-enabled if we can get AppImage size under ~2GB
+          # - os: ubuntu-latest 
     needs: [build, test]
     if: startsWith(github.ref, 'refs/tags/')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: Buzz-${{ runner.os }}-${{ runner.arch }}
 
@@ -365,38 +404,4 @@ jobs:
             Buzz*.exe
             Buzz*.bin
             Buzz*.dmg
-
-#  Brew Cask deployment fails and the app is deprecated on Brew.
-#  deploy_brew_cask:
-#    runs-on: macos-latest
-#    env:
-#      BUZZ_DISABLE_TELEMETRY: true
-#    needs: [release]
-#    if: startsWith(github.ref, 'refs/tags/')
-#    steps:
-#      - uses: actions/checkout@v4
-#        with:
-#          submodules: recursive
-#
-#      # Should be removed with next update to whisper.cpp
-#      - name: Downgrade Xcode
-#        uses: maxim-lobanov/setup-xcode@v1
-#        with:
-#          xcode-version: '16.0.0'
-#        if: matrix.os == 'macos-latest'
-#
-#      - name: Install uv
-#        uses: astral-sh/setup-uv@v6
-#
-#      - name: Set up Python
-#        uses: actions/setup-python@v5
-#        with:
-#          python-version: "3.12"
-#
-#      - name: Install dependencies
-#        run: uv sync
-#
-#      - name: Upload to Brew
-#        run: uv run make upload_brew
-#        env:
-#          HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.HOMEBREW_GITHUB_API_TOKEN }}
+            Buzz*.AppImage

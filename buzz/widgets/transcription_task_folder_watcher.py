@@ -5,17 +5,14 @@ from typing import Dict
 from PyQt6.QtCore import QFileSystemWatcher, pyqtSignal, QObject
 
 from buzz.store.keyring_store import Key, get_password
-from buzz.transcriber.transcriber import FileTranscriptionTask
+from buzz.transcriber.transcriber import (
+    FileTranscriptionTask,
+    SUPPORTED_EXTENSIONS,
+)
 from buzz.model_loader import ModelDownloader
 from buzz.widgets.preferences_dialog.models.folder_watch_preferences import (
     FolderWatchPreferences,
 )
-
-# Supported media file extensions (audio and video)
-SUPPORTED_EXTENSIONS = {
-    ".mp3", ".wav", ".m4a", ".ogg", ".opus", ".flac",  # audio
-    ".mp4", ".webm", ".ogm", ".mov", ".mkv", ".avi", ".wmv",  # video
-}
 
 
 class TranscriptionTaskFolderWatcher(QFileSystemWatcher):
@@ -31,7 +28,7 @@ class TranscriptionTaskFolderWatcher(QFileSystemWatcher):
     ):
         super().__init__(parent)
         self.tasks = tasks
-        self.paths_emitted = set()
+        self.paths_emitted = {}
         self.set_preferences(preferences)
         self.directoryChanged.connect(self.find_tasks)
 
@@ -39,7 +36,7 @@ class TranscriptionTaskFolderWatcher(QFileSystemWatcher):
         self.preferences = preferences
         if len(self.directories()) > 0:
             self.removePaths(self.directories())
-        if preferences.enabled:
+        if preferences.enabled and preferences.input_directory:
             # Add the input directory and all subdirectories to the watcher
             for dirpath, dirnames, _ in os.walk(preferences.input_directory):
                 # Skip hidden directories
@@ -54,7 +51,7 @@ class TranscriptionTaskFolderWatcher(QFileSystemWatcher):
         input_directory = self.preferences.input_directory
         tasks = {task.file_path: task for task in self.tasks.values()}
 
-        if not self.preferences.enabled:
+        if not self.preferences.enabled or not self.preferences.input_directory:
             return
 
         for dirpath, dirnames, filenames in os.walk(input_directory):
@@ -73,7 +70,10 @@ class TranscriptionTaskFolderWatcher(QFileSystemWatcher):
                     or is_temp_conversion_file  # temp conversion files like .ogg.wav
                     or "_speech.mp3" in filename  # extracted speech output files
                     or file_path in tasks  # file already in tasks
-                    or file_path in self.paths_emitted  # file already emitted
+                    or self.paths_emitted.get(file_path) == (
+                        os.path.getsize(file_path),
+                        os.path.getmtime(file_path),
+)  # file already emitted
                 ):
                     continue
 
@@ -114,7 +114,10 @@ class TranscriptionTaskFolderWatcher(QFileSystemWatcher):
                     delete_source_file=self.preferences.delete_processed_files,
                 )
                 self.task_found.emit(task)
-                self.paths_emitted.add(file_path)
+                self.paths_emitted[file_path] = (
+                 os.path.getsize(file_path),
+                 os.path.getmtime(file_path),
+)
 
             # Filter out hidden directories and add new subdirectories to the watcher
             dirnames[:] = [d for d in dirnames if not d.startswith(".")]

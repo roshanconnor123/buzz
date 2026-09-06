@@ -1,8 +1,15 @@
+import glob
 import multiprocessing
 import os
 import platform
 import random
 import string
+
+# Disable the GUI startup update check during tests. The check fires an async
+# QNetworkAccessManager HTTPS request which, while in flight, interferes with
+# multiprocessing spawn on Windows and crashes child transcription processes.
+# Tests must also never depend on network availability.
+os.environ.setdefault("BUZZ_DISABLE_UPDATE_CHECK", "1")
 
 import pytest
 
@@ -83,3 +90,35 @@ def settings():
 @pytest.fixture(scope="session")
 def shortcuts(settings):
     return Shortcuts(settings)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_testdata_exports():
+    """Remove transcription export files written into testdata/ during the test session.
+
+    Transcription tests (e.g. the MainWindow flow) transcribe a bundled
+    ``testdata/*.mp3`` with no explicit output directory, so the export lands
+    next to the source as ``<name> (transcribed on <date>).<ext>``. Those export
+    files are never checked in, so we additionally sweep that pattern at setup
+    and teardown to clear artifacts leaked by a previous interrupted run.
+    """
+    testdata_dir = os.path.join(os.path.dirname(__file__), "..", "testdata")
+    export_glob = os.path.join(testdata_dir, "* (transcribed on *)*")
+
+    def _sweep_leaked_exports():
+        for path in glob.glob(export_glob):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    _sweep_leaked_exports()
+    before = set(glob.glob(os.path.join(testdata_dir, "*")))
+    yield
+    after = set(glob.glob(os.path.join(testdata_dir, "*")))
+    for path in after - before:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    _sweep_leaked_exports()

@@ -170,7 +170,45 @@ class TranscriptionResizerWidget(QWidget):
 
         layout = QFormLayout(self)
 
-        # Extend segment endings
+        self._setup_settings_section(layout)
+
+        self._setup_extend_section(layout)
+
+        self._setup_resize_section(layout)
+
+        self._setup_merge_section(layout)
+
+        self.setLayout(layout)
+
+    def _setup_settings_section(self, layout: QFormLayout):
+        settings_label = QLabel(_("Settings"), self)
+        font = settings_label.font()
+        font.setWeight(QFont.Weight.Bold)
+        settings_label.setFont(font)
+        layout.addRow(settings_label)
+
+        settings_group_box = QGroupBox(self)
+        settings_layout = QVBoxLayout(settings_group_box)
+
+        self.create_new_transcript_checkbox = QCheckBox(_("Create new transcript"))
+        self.create_new_transcript_checkbox.setChecked(
+            self.settings.value(
+                Settings.Key.TRANSCRIPTION_RESIZER_CREATE_NEW_TRANSCRIPT, True
+            )
+        )
+        self.create_new_transcript_checkbox.toggled.connect(
+            self.on_create_new_transcript_toggled
+        )
+        settings_layout.addWidget(self.create_new_transcript_checkbox)
+
+        layout.addRow(settings_group_box)
+
+        settings_spacer = QSpacerItem(
+            0, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed
+        )
+        layout.addItem(settings_spacer)
+
+    def _setup_extend_section(self, layout: QFormLayout):
         extend_label = QLabel(_("Extend end time"), self)
         font = extend_label.font()
         font.setWeight(QFont.Weight.Bold)
@@ -198,11 +236,10 @@ class TranscriptionResizerWidget(QWidget):
 
         layout.addRow(extend_group_box)
 
-        # Spacer
         spacer1 = QSpacerItem(0, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         layout.addItem(spacer1)
 
-        # Resize longer subtitles
+    def _setup_resize_section(self, layout: QFormLayout):
         resize_label = QLabel(_("Resize Options"), self)
         font = resize_label.font()
         font.setWeight(QFont.Weight.Bold)
@@ -236,11 +273,10 @@ class TranscriptionResizerWidget(QWidget):
 
         layout.addRow(resize_group_box)
 
-        # Spacer
         spacer2 = QSpacerItem(0, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         layout.addItem(spacer2)
 
-        # Merge words into subtitles
+    def _setup_merge_section(self, layout: QFormLayout):
         merge_options_label = QLabel(_("Merge Options"), self)
         font = merge_options_label.font()
         font.setWeight(QFont.Weight.Bold)
@@ -293,7 +329,27 @@ class TranscriptionResizerWidget(QWidget):
 
         layout.addRow(merge_options_group_box)
 
-        self.setLayout(layout)
+    def on_create_new_transcript_toggled(self, checked: bool):
+        self.settings.set_value(
+            Settings.Key.TRANSCRIPTION_RESIZER_CREATE_NEW_TRANSCRIPT, checked
+        )
+
+    def save_segments(self, segments):
+        if self.create_new_transcript_checkbox.isChecked():
+            transcript_id = self.transcription_service.copy_transcription(
+                self.transcription.id_as_uuid
+            )
+            self.transcription_service.update_transcription_as_completed(
+                transcript_id, segments
+            )
+        else:
+            transcript_id = self.transcription.id_as_uuid
+            self.transcription_service.replace_transcription_segments(
+                transcript_id, segments
+            )
+
+        if self.transcriptions_updated_signal:
+            self.transcriptions_updated_signal.emit(transcript_id)
 
     def load_preferences(self):
         self.settings.settings.beginGroup("file_transcriber")
@@ -337,13 +393,7 @@ class TranscriptionResizerWidget(QWidget):
             if round(sub.start) != round(sub.end)
         ]
 
-        new_transcript_id = self.transcription_service.copy_transcription(
-            self.transcription.id_as_uuid
-        )
-        self.transcription_service.update_transcription_as_completed(new_transcript_id, segments)
-
-        if self.transcriptions_updated_signal:
-            self.transcriptions_updated_signal.emit(new_transcript_id)
+        self.save_segments(segments)
 
     def on_extend_button_clicked(self):
         try:
@@ -375,22 +425,19 @@ class TranscriptionResizerWidget(QWidget):
                 )
             )
 
-        new_transcript_id = self.transcription_service.copy_transcription(
-            self.transcription.id_as_uuid
-        )
-        self.transcription_service.update_transcription_as_completed(new_transcript_id, extended_segments)
-
-        if self.transcriptions_updated_signal:
-            self.transcriptions_updated_signal.emit(new_transcript_id)
+        self.save_segments(extended_segments)
 
     def on_merge_button_clicked(self):
-        self.new_transcript_id = self.transcription_service.copy_transcription(
-            self.transcription.id_as_uuid
-        )
-        self.transcription_service.update_transcription_progress(self.new_transcript_id, 0.0)
+        if self.create_new_transcript_checkbox.isChecked():
+            self.new_transcript_id = self.transcription_service.copy_transcription(
+                self.transcription.id_as_uuid
+            )
+            self.transcription_service.update_transcription_progress(self.new_transcript_id, 0.0)
 
-        if self.transcriptions_updated_signal:
-            self.transcriptions_updated_signal.emit(self.new_transcript_id)
+            if self.transcriptions_updated_signal:
+                self.transcriptions_updated_signal.emit(self.new_transcript_id)
+        else:
+            self.new_transcript_id = self.transcription.id_as_uuid
 
         regroup_string = ''
         if self.merge_by_gap.isChecked():
@@ -431,7 +478,10 @@ class TranscriptionResizerWidget(QWidget):
 
     def on_transcription_completed(self, segments):
         if self.new_transcript_id is not None:
-            self.transcription_service.update_transcription_as_completed(self.new_transcript_id, segments)
+            if self.create_new_transcript_checkbox.isChecked():
+                self.transcription_service.update_transcription_as_completed(self.new_transcript_id, segments)
+            else:
+                self.transcription_service.replace_transcription_segments(self.new_transcript_id, segments)
 
             if self.transcriptions_updated_signal:
                 self.transcriptions_updated_signal.emit(self.new_transcript_id)

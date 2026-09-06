@@ -1,14 +1,16 @@
 import os
 import logging
-from typing import Tuple, List, Optional
+from typing import Tuple, List, Optional, Set
 from uuid import UUID
 
 from PyQt6 import QtGui
 from PyQt6.QtCore import (
     Qt,
     QThread,
+    QThreadPool,
     QModelIndex,
-    pyqtSignal
+    pyqtSignal,
+    pyqtSlot,
 )
 
 from PyQt6.QtGui import QIcon
@@ -23,7 +25,10 @@ from buzz.db.entity.transcription import Transcription
 from buzz.db.service.transcription_service import TranscriptionService
 from buzz.file_transcriber_queue_worker import FileTranscriberQueueWorker
 from buzz.locale import _
+from buzz.plugins.manager import PluginManager
+from buzz.plugins.post_processing import FnRunnable
 from buzz.settings.settings import APP_NAME, Settings
+from buzz.sleep_inhibitor import SleepInhibitor
 from buzz.update_checker import UpdateChecker, UpdateInfo
 from buzz.widgets.update_dialog import UpdateDialog
 from buzz.settings.shortcuts import Shortcuts
@@ -33,6 +38,7 @@ from buzz.transcriber.transcriber import (
     TranscriptionOptions,
     FileTranscriptionOptions,
     SUPPORTED_AUDIO_FORMATS,
+    SUPPORTED_EXTENSIONS,
     Segment,
 )
 from buzz.widgets.icon import BUZZ_ICON_PATH
@@ -43,7 +49,6 @@ from buzz.widgets.preferences_dialog.models.preferences import Preferences
 from buzz.widgets.transcriber.file_transcriber_widget import FileTranscriberWidget
 from buzz.widgets.transcription_task_folder_watcher import (
     TranscriptionTaskFolderWatcher,
-    SUPPORTED_EXTENSIONS,
 )
 from buzz.widgets.transcription_tasks_table_widget import (
     TranscriptionTasksTableWidget,
@@ -51,6 +56,15 @@ from buzz.widgets.transcription_tasks_table_widget import (
 from buzz.widgets.transcription_viewer.transcription_viewer_widget import (
     TranscriptionViewerWidget,
 )
+
+
+def find_media_files_in_folder(folder: str) -> List[str]:
+    file_paths = []
+    for dirpath, _dirs, filenames in os.walk(folder):
+        for filename in sorted(filenames):
+            if os.path.splitext(filename)[1].lower() in SUPPORTED_EXTENSIONS:
+                file_paths.append(os.path.join(dirpath, filename))
+    return file_paths
 
 
 class MainWindow(QMainWindow):
@@ -66,11 +80,24 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
 
         self.settings = Settings()
+        self.sleep_inhibitor = SleepInhibitor(
+            enabled=self.settings.value(
+                Settings.Key.PREVENT_SLEEP_WHILE_TRANSCRIBING,
+                True,
+            )
+        )
 
         self.shortcuts = Shortcuts(settings=self.settings)
 
         self.quit_on_complete = False
+        self.pending_quit_task_uids: Set[UUID] = set()
         self.transcription_service = transcription_service
+
+        self.plugin_manager = PluginManager(self.transcription_service, self.settings)
+        try:
+            self.plugin_manager.initialize()
+        except Exception as exc:
+            logging.error(f"Failed to initialize plugins: {exc}", exc_info=True)
 
         #update checker
         self._update_info: Optional[UpdateInfo] = None
@@ -99,6 +126,7 @@ class MainWindow(QMainWindow):
         self.menu_bar = MenuBar(
             shortcuts=self.shortcuts,
             preferences=self.preferences,
+            plugin_manager=self.plugin_manager,
             parent=self,
         )
         self.menu_bar.import_action_triggered.connect(
@@ -135,6 +163,7 @@ class MainWindow(QMainWindow):
         self.transcriber_thread = QThread()
 
         self.transcriber_worker = FileTranscriberQueueWorker()
+        self.transcriber_worker.plugin_manager = self.plugin_manager
         self.transcriber_worker.moveToThread(self.transcriber_thread)
 
         self.transcriber_worker.task_started.connect(self.on_task_started)
@@ -144,6 +173,10 @@ class MainWindow(QMainWindow):
         )
         self.transcriber_worker.task_error.connect(self.on_task_error)
         self.transcriber_worker.task_completed.connect(self.on_task_completed)
+        self.transcriber_worker.queue_busy_changed.connect(
+            self.on_queue_busy_changed,
+            Qt.ConnectionType.QueuedConnection,
+        )
 
         self.transcriber_worker.completed.connect(self.transcriber_thread.quit)
 
@@ -168,8 +201,18 @@ class MainWindow(QMainWindow):
     def on_preferences_changed(self, preferences: Preferences):
         self.preferences = preferences
         self.save_preferences(preferences)
+        self.sleep_inhibitor.set_enabled(
+            self.settings.value(
+                Settings.Key.PREVENT_SLEEP_WHILE_TRANSCRIBING,
+                True,
+            )
+        )
         self.folder_watcher.set_preferences(preferences.folder_watch)
         self.folder_watcher.find_tasks()
+
+    @pyqtSlot(bool)
+    def on_queue_busy_changed(self, busy: bool):
+        self.sleep_inhibitor.set_busy(busy)
 
     def save_preferences(self, preferences: Preferences):
         self.settings.settings.beginGroup("preferences")
@@ -185,12 +228,33 @@ class MainWindow(QMainWindow):
     def dragEnterEvent(self, event):
         # Accept file drag events
         if event.mimeData().hasUrls():
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.setDropAction(Qt.DropAction.CopyAction)
             event.accept()
         else:
             event.ignore()
 
     def dropEvent(self, event):
-        file_paths = [url.toLocalFile() for url in event.mimeData().urls()]
+        file_paths = []
+        for url in event.mimeData().urls():
+            path = url.toLocalFile()
+            if os.path.isdir(path):
+                file_paths.extend(find_media_files_in_folder(path))
+            elif path:
+                file_paths.append(path)
+
+        if len(file_paths) == 0:
+            event.ignore()
+            return
+
+        event.setDropAction(Qt.DropAction.CopyAction)
+        event.accept()
         self.open_file_transcriber_widget(file_paths=file_paths)
 
     def on_file_transcriber_triggered(
@@ -255,11 +319,17 @@ class MainWindow(QMainWindow):
             self.on_table_selection_changed()
 
     def on_new_transcription_action_triggered(self):
+        last_folder = self.settings.value(Settings.Key.LAST_IMPORT_FOLDER, "")
+
         (file_paths, __) = QFileDialog.getOpenFileNames(
-            self, _("Select audio file"), "", SUPPORTED_AUDIO_FORMATS
+            self, _("Select audio file"), last_folder, SUPPORTED_AUDIO_FORMATS
         )
         if len(file_paths) == 0:
             return
+
+        self.settings.set_value(
+            Settings.Key.LAST_IMPORT_FOLDER, os.path.dirname(file_paths[0])
+        )
 
         self.open_file_transcriber_widget(file_paths)
 
@@ -269,15 +339,14 @@ class MainWindow(QMainWindow):
             self.open_file_transcriber_widget(url=url)
 
     def on_import_folder_action_triggered(self):
-        folder = QFileDialog.getExistingDirectory(self, _("Select folder"))
+        last_folder = self.settings.value(Settings.Key.LAST_IMPORT_FOLDER, "")
+        folder = QFileDialog.getExistingDirectory(
+            self, _("Select folder"), last_folder
+        )
         if not folder:
             return
-        file_paths = []
-        for dirpath, _dirs, filenames in os.walk(folder):
-            for filename in filenames:
-                ext = os.path.splitext(filename)[1].lower()
-                if ext in SUPPORTED_EXTENSIONS:
-                    file_paths.append(os.path.join(dirpath, filename))
+        self.settings.set_value(Settings.Key.LAST_IMPORT_FOLDER, folder)
+        file_paths = find_media_files_in_folder(folder)
         if not file_paths:
             return
         self.open_file_transcriber_widget(file_paths)
@@ -337,9 +406,9 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def can_open_transcript(transcription: Transcription) -> bool:
-        return (
-            FileTranscriptionTask.Status(transcription.status)
-            == FileTranscriptionTask.Status.COMPLETED
+        return FileTranscriptionTask.Status(transcription.status) in (
+            FileTranscriptionTask.Status.COMPLETED,
+            FileTranscriptionTask.Status.SKIPPED,
         )
 
     def should_enable_stop_transcription_action(self):
@@ -356,6 +425,7 @@ class MainWindow(QMainWindow):
                 FileTranscriptionTask.Status.COMPLETED,
                 FileTranscriptionTask.Status.FAILED,
                 FileTranscriptionTask.Status.CANCELED,
+                FileTranscriptionTask.Status.SKIPPED,
             ]
         )
 
@@ -411,29 +481,65 @@ class MainWindow(QMainWindow):
         pass
 
     def on_task_completed(self, task: FileTranscriptionTask, segments: List[Segment]):
+        # Handle skipped tasks (e.g. plugin detected file already transcribed)
+        if task.status == FileTranscriptionTask.Status.SKIPPED:
+            self.transcription_service.update_transcription_as_skipped(task.uid, segments)
+            self.table_widget.refresh_row(task.uid)
+            self.quit_if_all_tasks_done(task)
+            return
+
         # Update file path in database only for URL imports where file is downloaded
         if task.source == FileTranscriptionTask.Source.URL_IMPORT and task.file_path:
             logging.debug(f"Updating transcription file path: {task.file_path}")
-            # Use the file basename (video title) as the display name
+            # URL titles are UI metadata and must not be used as working paths.
             basename = os.path.basename(task.file_path)
-            name = os.path.splitext(basename)[0]  # Remove .wav extension
+            name = task.display_name or os.path.splitext(basename)[0]
             self.transcription_service.update_transcription_file_and_name(task.uid, task.file_path, name)
 
-        self.transcription_service.update_transcription_as_completed(task.uid, segments)
-        self.table_widget.refresh_row(task.uid)
+        # When plugins are enabled, run the after_transcription / save / on_complete
+        # pipeline on a background thread so slow plugin work (e.g. network calls)
+        # doesn't freeze the UI. DB writes are marshaled back to the main thread by
+        # the plugin manager. When quitting on complete we run synchronously so the
+        # work isn't cut short.
+        run_async = (
+            self.plugin_manager.has_enabled_post_hooks() and not self.quit_on_complete
+        )
+        if run_async:
+            runnable = FnRunnable(
+                lambda: self.plugin_manager.process_completed(task, segments)
+            )
+            runnable.signals.finished.connect(
+                lambda: self.table_widget.refresh_row(task.uid)
+            )
+            runnable.signals.error.connect(
+                lambda e: logging.error(f"Plugin post-processing failed: {e}")
+            )
+            QThreadPool.globalInstance().start(runnable)
+        elif self.plugin_manager.has_enabled_post_hooks():
+            self.plugin_manager.process_completed(task, segments)
+            self.table_widget.refresh_row(task.uid)
+        else:
+            self.transcription_service.update_transcription_as_completed(task.uid, segments)
+            self.table_widget.refresh_row(task.uid)
 
-        if self.quit_on_complete:
-            self.close()
-            QApplication.quit()
+        self.quit_if_all_tasks_done(task)
 
+    def quit_if_all_tasks_done(self, task: FileTranscriptionTask):
+        if not self.quit_on_complete:
+            return
+
+        self.pending_quit_task_uids.discard(task.uid)
+        if len(self.pending_quit_task_uids) > 0:
+            return
+
+        self.close()
+        QApplication.quit()
 
     def on_task_error(self, task: FileTranscriptionTask, error: str):
         self.transcription_service.update_transcription_as_failed(task.uid, error)
         self.table_widget.refresh_row(task.uid)
 
-        if self.quit_on_complete:
-            self.close()
-            QApplication.quit()
+        self.quit_if_all_tasks_done(task)
 
     def on_shortcuts_changed(self):
         self.menu_bar.reset_shortcuts()
@@ -445,6 +551,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         self.save_geometry()
         self.settings.settings.sync()
+        self.sleep_inhibitor.close()
 
         if self.folder_watcher:
             try:
@@ -507,6 +614,14 @@ class MainWindow(QMainWindow):
         """Initializes and runs the update checker."""
         self.update_checker = UpdateChecker(settings=self.settings, parent=self)
         self.update_checker.update_available.connect(self._on_update_available)
+
+        # Allow disabling the automatic startup update check (e.g. in tests).
+        # An in-flight QNetworkAccessManager request interferes with
+        # ``multiprocessing`` spawn on Windows and crashes child transcription
+        # processes; tests should also never depend on network availability.
+        if os.getenv("BUZZ_DISABLE_UPDATE_CHECK"):
+            logging.debug("Startup update check disabled via BUZZ_DISABLE_UPDATE_CHECK")
+            return
 
         # Check for updates on startup
         self.update_checker.check_for_updates()

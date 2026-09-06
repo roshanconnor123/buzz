@@ -1,7 +1,8 @@
 import logging
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QThreadPool, QLocale
+from PyQt6.QtCore import Qt, QThreadPool, QLocale, QUrl
+from PyQt6.QtGui import QDesktopServices, QIcon
 from PyQt6.QtWidgets import (
     QWidget,
     QFormLayout,
@@ -10,7 +11,8 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QMessageBox,
     QHBoxLayout,
-    QLayout
+    QLayout,
+    QToolButton,
 )
 
 from buzz.locale import _
@@ -62,21 +64,47 @@ class ModelsPreferencesWidget(QWidget):
 
         layout = QFormLayout()
         layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
+
+        self._setup_model_type_section(layout, model_types)
+        self._setup_model_list(layout)
+        self._setup_custom_inputs(layout)
+        self._setup_action_buttons(layout)
+
+        self.reset()
+
+        self.setLayout(layout)
+
+    def _setup_model_type_section(self, layout, model_types):
         model_type_combo_box = ModelTypeComboBox(
             model_types=model_types,
             default_model=self.model.model_type if self.model is not None else None,
             parent=self,
         )
         model_type_combo_box.changed.connect(self.on_model_type_changed)
-        layout.addRow(_("Group"), model_type_combo_box)
 
+        info_button = QToolButton()
+        info_button.setIcon(QIcon.fromTheme("dialog-information"))
+        info_button.setToolTip(_("What model should I use?"))
+        info_button.clicked.connect(lambda: QDesktopServices.openUrl(
+            QUrl("https://chidiwilliams.github.io/buzz/docs/faq#4-what-model-should-i-use")
+        ))
+
+        group_layout = QHBoxLayout()
+        group_layout.addWidget(model_type_combo_box)
+        group_layout.addWidget(info_button)
+        group_layout.setContentsMargins(0, 0, 0, 0)
+        group_widget = QWidget()
+        group_widget.setLayout(group_layout)
+
+        layout.addRow(_("Group"), group_widget)
+
+    def _setup_model_list(self, layout):
         self.model_list_widget = QTreeWidget()
         self.model_list_widget.setColumnCount(1)
         self.model_list_widget.currentItemChanged.connect(self.on_model_size_changed)
         layout.addWidget(self.model_list_widget)
 
-        buttons_layout = QHBoxLayout()
-
+    def _setup_custom_inputs(self, layout):
         self.custom_model_id_input = HuggingFaceSearchLineEdit()
         self.custom_model_id_input.setObjectName("ModelIdInput")
 
@@ -91,6 +119,9 @@ class ModelsPreferencesWidget(QWidget):
         self.custom_model_link_input.textChanged.connect(self.on_custom_model_link_input_changed)
         layout.addRow("", self.custom_model_link_input)
         self.custom_model_link_input.hide()
+
+    def _setup_action_buttons(self, layout):
+        buttons_layout = QHBoxLayout()
 
         self.download_button = QPushButton(_("Download"))
         self.download_button.setObjectName("DownloadButton")
@@ -111,10 +142,6 @@ class ModelsPreferencesWidget(QWidget):
         buttons_layout.addWidget(self.delete_button)
 
         layout.addRow("", buttons_layout)
-
-        self.reset()
-
-        self.setLayout(layout)
 
     def on_model_size_changed(self, current: QTreeWidgetItem, _: QTreeWidgetItem):
         if current is None:

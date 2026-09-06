@@ -44,6 +44,7 @@ class TranscriptionService:
                     text=segment.text,
                     translation='',
                     transcription_id=str(id),
+                    speaker=segment.speaker,
                 )
             )
 
@@ -55,6 +56,26 @@ class TranscriptionService:
 
     def update_transcription_notes(self, id: UUID, notes: str):
         self.transcription_dao.update_transcription_notes(id, notes)
+
+    def update_transcription_language(self, id: UUID, language: str):
+        self.transcription_dao.update_transcription_language(id, language)
+
+    def update_transcription_as_skipped(self, id: UUID, segments: List[Segment]):
+        self.transcription_dao.update_transcription_as_skipped(id)
+        for segment in segments:
+            self.transcription_segment_dao.insert(
+                TranscriptionSegment(
+                    start_time=segment.start,
+                    end_time=segment.end,
+                    text=segment.text,
+                    translation='',
+                    transcription_id=str(id),
+                    speaker=segment.speaker,
+                )
+            )
+
+    def find_completed_transcription_by_filename(self, filename: str):
+        return self.transcription_dao.find_completed_transcription_by_filename(filename)
 
     def reset_transcription_for_restart(self, id: UUID):
         self.transcription_dao.reset_transcription_for_restart(id)
@@ -69,6 +90,7 @@ class TranscriptionService:
                     text=segment.text,
                     translation='',
                     transcription_id=str(id),
+                    speaker=segment.speaker,
                 )
             )
 
@@ -77,3 +99,8 @@ class TranscriptionService:
 
     def update_segment_translation(self, segment_id: int, translation: str):
         return self.transcription_segment_dao.update_segment_translation(segment_id, translation)
+
+    def update_segment_speaker(self, segment_id: int, speaker: str):
+        return self.transcription_segment_dao.update_segment_speaker(
+            segment_id, speaker
+        )

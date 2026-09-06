@@ -3,6 +3,7 @@ import os
 import sys
 import locale
 import platform
+import threading
 import darkdetect
 
 from posthog import Posthog
@@ -34,7 +35,11 @@ class Application(QApplication):
 
         if darkdetect.isDark():
             self.styleHints().setColorScheme(Qt.ColorScheme.Dark)
-            self.setStyleSheet("QCheckBox::indicator:unchecked { border: 1px solid white; }")
+            self.setStyleSheet(
+                "QCheckBox::indicator:unchecked,"
+                " QAbstractItemView::indicator:unchecked"
+                " { border: 1px solid white; }"
+            )
 
         if sys.platform.startswith("win"):
             self.setStyle(QStyleFactory.create("Fusion"))
@@ -85,6 +90,7 @@ class Application(QApplication):
                 "machine": platform.machine(),
                 "version": platform.version(),
             })
+            threading.Thread(target=posthog.shutdown, daemon=True).start()
 
         logging.debug(f"Launching Buzz: {VERSION}, " 
                       f"locale: {locale.getlocale()}, "
@@ -99,6 +105,10 @@ class Application(QApplication):
 
     def add_task(self, task: FileTranscriptionTask, quit_on_complete: bool = False):
         self.window.quit_on_complete = quit_on_complete
+        if quit_on_complete:
+            # Track every queued task so the app only quits once the whole 
+            # batch is done.
+            self.window.pending_quit_task_uids.add(task.uid)
         self.window.add_task(task)
 
     def close_database(self):

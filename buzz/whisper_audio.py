@@ -45,7 +45,7 @@ def load_audio(file: str, sr: int = SAMPLE_RATE):
         "-ac", "1",
         "-acodec", "pcm_s16le",
         "-ar", str(sr),
-        "-loglevel", "panic",
+        "-loglevel", "error",
         "-"
     ]
     # fmt: on
@@ -64,10 +64,9 @@ def load_audio(file: str, sr: int = SAMPLE_RATE):
         result = subprocess.run(cmd, capture_output=True)
 
     if result.returncode != 0:
-        logging.warning(f"FFMPEG audio load warning. Process return code was not zero: {result.returncode}")
-
-    if len(result.stderr):
-        logging.warning(f"FFMPEG audio load error. Error: {result.stderr.decode()}")
-        raise RuntimeError(f"FFMPEG Failed to load audio: {result.stderr.decode()}")
+        error_text = result.stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(
+            f"FFMPEG Failed to load audio: {error_text or result.returncode}"
+        )
 
     return np.frombuffer(result.stdout, np.int16).flatten().astype(np.float32) / 32768.0
